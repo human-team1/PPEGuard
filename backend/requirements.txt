@@ -1,5 +1,8 @@
-Flask
-python-dotenv
-Flask-Cors
-SQLAlchemy
-PyMySQL
+Flask==3.0.0
+SQLAlchemy==2.0.21
+Flask-SQLAlchemy==3.1.1
+PyMySQL==1.1.0
+python-dotenv==1.0.0
+opencv-python-headless==4.8.1.78
+marshmallow==3.20.1
+SQLAlchemy>=2.0.0

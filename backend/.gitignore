@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+
+# Pytest and Test outputs
+.pytest_cache/
+pytest.log
+pytest_ascii.log
+test_output.log
+report*.xml
+
+# SQLite DBs
+*.db
+*.sqlite3
+
+# Environment variables
+.env
