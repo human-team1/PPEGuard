@@ -1,18 +1,13 @@
-from flask import Flask, jsonify
-from flask_cors import CORS
-from dotenv import load_dotenv
+import os
+import sys
 
-load_dotenv()
+# Ensure backend root is in PYTHONPATH if app.py is invoked directly
+sys.path.insert(0, os.path.dirname(__file__))
 
-app = Flask(__name__)
-CORS(app)
+from app import create_app
 
-@app.route("/health", methods=["GET"])
-def health():
-    return jsonify({
-        "status": "ok",
-        "message": "backend is running"
-    })
+app = create_app()
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)

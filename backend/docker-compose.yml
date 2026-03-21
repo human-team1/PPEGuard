@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  ppe-guard-backend:
+    build: .
+    container_name: ppe_guard_backend
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./ppe_guard.db:/app/ppe_guard.db
+      - ./uploads:/app/uploads
+    env_file:
+      - .env
+    restart: unless-stopped

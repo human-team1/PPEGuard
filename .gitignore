@@ -8,10 +8,6 @@ __pycache__/
 venv/
 backend/.venv/
 
-# Env files
-.env
-.env.*
-
 # VS Code
 .vscode/
 
