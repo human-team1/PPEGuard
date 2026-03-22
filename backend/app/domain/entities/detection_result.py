@@ -1,7 +1,8 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from decimal import Decimal
 from enum import Enum
+from decimal import Decimal
+from typing import Optional
 
 class OverallPPEStatus(Enum):
     COMPLIANT = "COMPLIANT"
@@ -15,22 +16,23 @@ class ItemWearStatus(Enum):
 
 @dataclass
 class DetectionResult:
-    session_id: int
-    detected_at: datetime
-    person_index: int
-    overall_ppe_status: OverallPPEStatus
-    helmet_status: ItemWearStatus
-    vest_status: ItemWearStatus
-    created_at: datetime
-    updated_at: datetime
-    id: int | None = None
-    frame_no: int | None = None
-    frame_time_sec: Decimal | None = None
-    employee_no: str | None = None
-    ocr_text: str | None = None
-    ocr_confidence: Decimal | None = None
-    person_box_x: int | None = None
-    person_box_y: int | None = None
-    person_box_width: int | None = None
-    person_box_height: int | None = None
-    image_path: str | None = None
+    frame_id: int                            # analysis_frame.id 참조
+    person_index: int                        # 동일 프레임 내 사람 순번
+    overall_ppe_status: OverallPPEStatus     # 컴플라이언스 여부
+    helmet_status: ItemWearStatus            # 헬멧 착용 여부
+    vest_status: ItemWearStatus              # 조끼 착용 여부
+    
+    id: Optional[int] = None                 # 결과 PK
+    employee_no: Optional[str] = None        # 사번 (OCR 인식 완료 시)
+    ocr_text: Optional[str] = None           # OCR 원문
+    ocr_confidence: Optional[Decimal] = None # OCR 신뢰도
+    
+    person_box_x: Optional[int] = None       # 사람 박스 좌표들
+    person_box_y: Optional[int] = None
+    person_box_width: Optional[int] = None
+    person_box_height: Optional[int] = None
+    
+    crop_image_path: Optional[str] = None    # 잘라낸 이미지 경로
+    
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
