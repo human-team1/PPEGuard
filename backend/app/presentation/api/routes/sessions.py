@@ -30,13 +30,19 @@ def create_session():
             source_name=data.get('source_name'),
             requested_by=data.get('requested_by')
         )
+    except KeyError as e:
+        return jsonify({"error": "Bad Request", "details": f"source_type '{source_type_str}' is not valid. Use WEBCAM or VIDEO_FILE."}), 400
     except Exception as e:
         return jsonify({"error": "Bad Request", "details": str(e)}), 400
 
-    usecase = StartAnalysisSessionUseCase(get_session_repo())
-    session = usecase.execute(cmd)
-    
-    return jsonify(serialize(session)), 201
+    try:
+        usecase = StartAnalysisSessionUseCase(get_session_repo())
+        session = usecase.execute(cmd)
+        return jsonify(serialize(session)), 201
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        return jsonify({"error": "Internal Server Error", "details": str(e), "trace": error_trace}), 500
 
 @sessions_bp.route('/<session_id>', methods=['GET'])
 def get_session(session_id: str):
