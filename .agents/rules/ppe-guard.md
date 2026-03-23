@@ -2,6 +2,10 @@
 trigger: always_on
 ---
 
+---
+trigger: always_on
+---
+
 Always answer in Korean.
 
 Treat this workspace as the PPE Guard project.
