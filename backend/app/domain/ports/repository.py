@@ -50,5 +50,9 @@ class DetectionResultRepository(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def find_by_session_id(self, session_id: int):
+        pass
+
+    @abc.abstractmethod
     def find_recent(self, limit: int):
         pass

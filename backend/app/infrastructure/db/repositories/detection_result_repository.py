@@ -2,6 +2,7 @@ from decimal import Decimal
 from app.domain.entities.detection_result import DetectionResult, OverallPPEStatus, ItemWearStatus
 from app.domain.ports.repository import DetectionResultRepository
 from app.infrastructure.db.models.detection_result import DetectionResultModel
+from app.infrastructure.db.models.analysis_frame import AnalysisFrameModel
 from app.infrastructure.db.session import SessionLocal
 
 # DetectionResult 엔티티와 ORM 모델을 연결하는 매핑 + 저장 repository
@@ -57,6 +58,16 @@ class SQLAlchemyDetectionResultRepository(DetectionResultRepository):
     def find_by_frame_id(self, frame_id):
         with SessionLocal() as db_session:
             models = db_session.query(DetectionResultModel).filter_by(frame_id=frame_id).all()
+            return [self._to_domain(m) for m in models] 
+        
+    def find_by_session_id(self, session_id):
+        with SessionLocal() as db_session:
+            models = (
+                db_session.query(DetectionResultModel)
+                .join(AnalysisFrameModel, DetectionResultModel.frame_id == AnalysisFrameModel.id)
+                .filter(AnalysisFrameModel.session_id == session_id)
+                .all()
+            )
             return [self._to_domain(m) for m in models]
 
     def find_recent(self, limit):
@@ -74,4 +85,5 @@ class SQLAlchemyDetectionResultRepository(DetectionResultRepository):
             model = db_session.query(DetectionResultModel).filter_by(id=id).first()
             if model:
                 return self._to_domain(model)
-            return None
+            return None 
+        
