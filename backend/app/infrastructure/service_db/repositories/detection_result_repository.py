@@ -1,9 +1,9 @@
 from decimal import Decimal
 from app.domain.entities.detection_result import DetectionResult, OverallPPEStatus, ItemWearStatus
 from app.domain.ports.repository import DetectionResultRepository
-from app.infrastructure.db.models.detection_result import DetectionResultModel
-from app.infrastructure.db.models.analysis_frame import AnalysisFrameModel
-from app.infrastructure.db.session import SessionLocal
+from app.infrastructure.service_db.models.detection_result import DetectionResultModel
+from app.infrastructure.service_db.models.analysis_frame import AnalysisFrameModel
+from app.infrastructure.service_db.session import SessionLocal
 
 # DetectionResult 엔티티와 ORM 모델을 연결하는 매핑 + 저장 repository
 class SQLAlchemyDetectionResultRepository(DetectionResultRepository):

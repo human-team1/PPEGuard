@@ -1,8 +1,8 @@
 from decimal import Decimal
 from app.domain.entities.analysis_frame import AnalysisFrame, FrameProcessingStatus
 from app.domain.ports.repository import AnalysisFrameRepository
-from app.infrastructure.db.models.analysis_frame import AnalysisFrameModel
-from app.infrastructure.db.session import SessionLocal
+from app.infrastructure.service_db.models.analysis_frame import AnalysisFrameModel
+from app.infrastructure.service_db.session import SessionLocal
 
 class SQLAlchemyAnalysisFrameRepository(AnalysisFrameRepository):
     def _to_domain(self, model: AnalysisFrameModel) -> AnalysisFrame:

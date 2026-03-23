@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Integer, DateTime, Numeric, ForeignKey
-from app.infrastructure.db.base import Base
+from app.infrastructure.service_db.base import Base
 
 class DetectionResultModel(Base):
     __tablename__ = "detection_result"

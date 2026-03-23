@@ -1,7 +1,7 @@
 from app.domain.entities.analysis_session import AnalysisSession, AnalysisSourceType, AnalysisSessionStatus
 from app.domain.ports.repository import AnalysisSessionRepository
-from app.infrastructure.db.models.analysis_session import AnalysisSessionModel
-from app.infrastructure.db.session import SessionLocal
+from app.infrastructure.service_db.models.analysis_session import AnalysisSessionModel
+from app.infrastructure.service_db.session import SessionLocal
 
 
 class SQLAlchemyAnalysisSessionRepository(AnalysisSessionRepository):
