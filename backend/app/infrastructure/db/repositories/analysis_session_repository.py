@@ -3,6 +3,7 @@ from app.domain.ports.repository import AnalysisSessionRepository
 from app.infrastructure.db.models.analysis_session import AnalysisSessionModel
 from app.infrastructure.db.session import SessionLocal
 
+
 class SQLAlchemyAnalysisSessionRepository(AnalysisSessionRepository):
     def _to_domain(self, model: AnalysisSessionModel) -> AnalysisSession:
         return AnalysisSession(
@@ -42,7 +43,7 @@ class SQLAlchemyAnalysisSessionRepository(AnalysisSessionRepository):
             updated_at=domain.updated_at
         )
 
-    def save(self, session: AnalysisSession) -> None:
+    def save(self, session: AnalysisSession):
         with SessionLocal() as db_session:
             model = self._to_model(session)
             db_session.add(model)
@@ -50,21 +51,31 @@ class SQLAlchemyAnalysisSessionRepository(AnalysisSessionRepository):
             db_session.refresh(model)
             session.id = model.id
 
-    def update(self, session: AnalysisSession) -> None:
+    def update(self, session: AnalysisSession):
         with SessionLocal() as db_session:
-            model = db_session.query(AnalysisSessionModel).filter_by(session_id=session.session_id).first()
+            model = (
+                db_session.query(AnalysisSessionModel)
+                .filter_by(session_id=session.session_id)
+                .first()
+            )
+
             if model:
                 model.status = session.status.value
                 model.processed_frames = session.processed_frames
                 model.detected_count = session.detected_count
+                model.started_at = session.started_at
                 model.finished_at = session.finished_at
                 model.fail_reason = session.fail_reason
                 model.updated_at = session.updated_at
                 db_session.commit()
 
-    def find_by_session_id(self, session_id: str) -> AnalysisSession | None:
+    def find_by_session_id(self, session_id: str):
         with SessionLocal() as db_session:
-            model = db_session.query(AnalysisSessionModel).filter_by(session_id=session_id).first()
+            model = (
+                db_session.query(AnalysisSessionModel)
+                .filter_by(session_id=session_id)
+                .first()
+            )
             if model:
                 return self._to_domain(model)
             return None

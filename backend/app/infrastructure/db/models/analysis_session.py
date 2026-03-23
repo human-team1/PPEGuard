@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, DateTime
+from sqlalchemy import Column, String, Integer, DateTime, BigInteger
 from app.infrastructure.db.base import Base
 
 class AnalysisSessionModel(Base):

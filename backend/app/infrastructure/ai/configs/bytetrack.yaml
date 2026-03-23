@@ -1,0 +1,7 @@
+tracker_type: bytetrack 
+track_high_thresh: 0.5 # 0.5 이상 대상 추적
+track_low_thresh: 0.1  # 이후 0.1 까지는 추적 시도
+new_track_thresh: 0.6  # 0.6 이상에게 새 id 발급
+track_buffer: 30       # ID 유지 시간 (프레임)
+match_thresh: 0.8      # 매칭 엄격도
+fuse_score: True       # 신뢰도

@@ -2,8 +2,7 @@ from app.infrastructure.db.session import engine
 from app.infrastructure.db.base import Base
 
 # 이 모듈들이 임포트되어야 Base.metadata가 테이블을 인식합니다.
-from app.infrastructure.db.models.analysis_session import AnalysisSessionModel
-from app.infrastructure.db.models.detection_result import DetectionResultModel
+from app.infrastructure.database.orm_models import AnalysisSessionORM, AnalysisFrameORM, DetectionResultORM
 
 def create_db_tables():
     print("서비스 내부 DB 테이블 생성을 시작합니다...")
