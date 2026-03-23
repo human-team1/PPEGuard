@@ -14,12 +14,19 @@ class Config:
     )
 
     # 고객사 사내망 DB
-    CUSTOMER_DB_DRIVER = os.getenv("CUSTOMER_DB_DRIVER", "")
+    CUSTOMER_DB_DRIVER = os.getenv("CUSTOMER_DB_DRIVER", "mysql+pymysql")
     CUSTOMER_DB_HOST = os.getenv("CUSTOMER_DB_HOST", "")
-    CUSTOMER_DB_PORT = os.getenv("CUSTOMER_DB_PORT", "")
+    CUSTOMER_DB_PORT = os.getenv("CUSTOMER_DB_PORT", "3306")
     CUSTOMER_DB_NAME = os.getenv("CUSTOMER_DB_NAME", "")
     CUSTOMER_DB_USER = os.getenv("CUSTOMER_DB_USER", "")
     CUSTOMER_DB_PASSWORD = os.getenv("CUSTOMER_DB_PASSWORD", "")
+
+    @classmethod
+    def get_customer_db_uri(cls):
+        if not cls.CUSTOMER_DB_HOST or not cls.CUSTOMER_DB_NAME or not cls.CUSTOMER_DB_USER:
+            raise ValueError("고객사 DB 연결 설정(CUSTOMER_DB_HOST, CUSTOMER_DB_NAME, CUSTOMER_DB_USER)이 누락되었습니다. .env 파일을 확인해 주세요.")
+        
+        return f"{cls.CUSTOMER_DB_DRIVER}://{cls.CUSTOMER_DB_USER}:{cls.CUSTOMER_DB_PASSWORD}@{cls.CUSTOMER_DB_HOST}:{cls.CUSTOMER_DB_PORT}/{cls.CUSTOMER_DB_NAME}"
 
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads"))
     AI_DETECTOR_PROVIDER = os.getenv("AI_DETECTOR_PROVIDER", "mock")

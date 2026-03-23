@@ -1,9 +1,10 @@
 from typing import List
 from ...domain.entities.detection_result import DetectionResult
-from ...domain.ports.repository import AnalysisSessionRepository, DetectionResultRepository
+from ...domain.ports.repository import AnalysisSessionRepository
+from ...domain.ports.service_detection_result_repository import ServiceDetectionResultRepository
 
 class GetSessionResultsUseCase:
-    def __init__(self, session_repo: AnalysisSessionRepository, result_repo: DetectionResultRepository):
+    def __init__(self, session_repo: AnalysisSessionRepository, result_repo: ServiceDetectionResultRepository):
         self.session_repo = session_repo
         self.result_repo = result_repo
 

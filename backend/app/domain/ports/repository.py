@@ -35,24 +35,4 @@ class AnalysisFrameRepository(abc.ABC):
     def find_by_session_id(self, session_id: int):
         pass
 
-
-class DetectionResultRepository(abc.ABC):
-    @abc.abstractmethod
-    def save(self, result: DetectionResult):
-        pass
-
-    @abc.abstractmethod
-    def find_by_id(self, result_id: int):
-        pass
-
-    @abc.abstractmethod
-    def find_by_frame_id(self, frame_id: int):
-        pass
-
-    @abc.abstractmethod
-    def find_by_session_id(self, session_id: int):
-        pass
-
-    @abc.abstractmethod
-    def find_recent(self, limit: int):
-        pass
+
