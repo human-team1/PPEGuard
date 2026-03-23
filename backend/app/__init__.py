@@ -8,4 +8,4 @@ def create_app():
     from app.presentation.api import init_api
     init_api(app)
 
-    return app
+    return app 

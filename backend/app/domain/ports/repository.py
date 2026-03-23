@@ -3,7 +3,6 @@ from ..entities.analysis_session import AnalysisSession
 from ..entities.analysis_frame import AnalysisFrame
 from ..entities.detection_result import DetectionResult
 
-
 class AnalysisSessionRepository(abc.ABC):
     @abc.abstractmethod
     def save(self, session: AnalysisSession):
@@ -16,7 +15,6 @@ class AnalysisSessionRepository(abc.ABC):
     @abc.abstractmethod
     def update(self, session: AnalysisSession):
         pass
-
 
 class AnalysisFrameRepository(abc.ABC):
     @abc.abstractmethod
@@ -35,4 +33,21 @@ class AnalysisFrameRepository(abc.ABC):
     def find_by_session_id(self, session_id: int):
         pass
 
-
+class DetectionResultRepository(abc.ABC):
+    @abc.abstractmethod
+    def save(self, frame: DetectionResult):
+        pass
+
+    @abc.abstractmethod
+    def update(self, frame: DetectionResult):
+        pass
+
+    @abc.abstractmethod
+    def find_by_id(self, frame_id: int):
+        pass
+
+    @abc.abstractmethod
+    def find_by_session_id(self, session_id: int):
+        pass
+
+

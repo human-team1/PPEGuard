@@ -16,7 +16,6 @@ class AnalysisFrame:
     frame_time_sec: Decimal            # 영상 내 시간(초)
     person_count: int = 0              # 탐지된 사람 수
     processing_status: FrameProcessingStatus = FrameProcessingStatus.PENDING
-    
     id: Optional[int] = None           # 프레임 PK
     captured_at: Optional[datetime] = None
     frame_image_path: Optional[str] = None
