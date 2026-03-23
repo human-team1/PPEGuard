@@ -4,7 +4,7 @@ from app.infrastructure.db.base import Base
 class AnalysisSessionModel(Base):
     __tablename__ = "analysis_session"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(String(50), unique=True, nullable=False)
     source_type = Column(String(20), nullable=False)
     source_name = Column(String(255), nullable=True)
