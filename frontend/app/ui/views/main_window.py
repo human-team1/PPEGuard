@@ -1,5 +1,5 @@
 import os
-from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QLabel, QTabWidget
+from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel
 from PySide6.QtCore import Qt
 from app.config.settings import AppSettings
 from app.services.api_client import ApiClient
@@ -13,7 +13,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("PPE Guard - Desktop Client")
-        self.resize(800, 650)
+        self.resize(1200, 700)
         
         self.settings = AppSettings()
         self.api_client = ApiClient(self.settings.get_server_url())
@@ -33,12 +33,14 @@ class MainWindow(QMainWindow):
         title_label.setStyleSheet("font-size: 20px; font-weight: bold; margin: 5px;")
         main_layout.addWidget(title_label)
         
-        self.tab_widget = QTabWidget()
-        main_layout.addWidget(self.tab_widget)
+        # 좌우 분할 레이아웃
+        content_layout = QHBoxLayout()
+        content_layout.setSpacing(15)
         
-        # 1. 탭 1: 분석 요청 뷰
-        req_widget = QWidget()
-        req_layout = QVBoxLayout(req_widget)
+        # 좌측 패널: 서버 연결, 입력 선택, 상태 표시
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setSpacing(8)
         
         self.server_widget = ServerConfigWidget(self.settings, self.api_client)
         self.input_widget = InputSelectionWidget()
@@ -50,14 +52,17 @@ class MainWindow(QMainWindow):
         self.input_widget.set_server_connected(False)
         self.input_widget.analysis_requested.connect(self._handle_analysis_request)
         
-        req_layout.addWidget(self.server_widget)
-        req_layout.addWidget(self.input_widget, stretch=1)
-        req_layout.addWidget(self.status_widget)
-        self.tab_widget.addTab(req_widget, "1. 분석 요청")
+        left_layout.addWidget(self.server_widget)
+        left_layout.addWidget(self.input_widget, stretch=1)
+        left_layout.addWidget(self.status_widget)
         
-        # 2. 탭 2: 결과 조회 뷰
+        # 우측 패널: 결과 조회
         self.result_view = ResultView(self.api_client)
-        self.tab_widget.addTab(self.result_view, "2. 통합 결과 조회")
+        
+        content_layout.addWidget(left_panel, stretch=1)
+        content_layout.addWidget(self.result_view, stretch=2)
+        
+        main_layout.addLayout(content_layout, stretch=1)
         
     def _handle_analysis_request(self, source_type: str, source_val: str):
         self.status_widget.show_loading("분석 세션 생성을 요청 중입니다...")
@@ -84,8 +89,7 @@ class MainWindow(QMainWindow):
         self.status_widget.show_success(f"생성 완료: [{session_id[:8]}] - 상태: {status}")
         self.input_widget.start_btn.setEnabled(True)
         
-        # 3단계 로직 적용: 성공 시 결과 조회 탭으로 자동 이동하고 목록 새로고침 발생
-        self.tab_widget.setCurrentIndex(1)
+        # 우측 결과 조회 뷰에서 자동으로 목록 새로고침 발생
         self.result_view.load_results()
         
     def _on_session_error(self, err_msg: str):

@@ -18,7 +18,14 @@ class ApiClient:
             raise ConnectionError(f"{action_msg}\n(원인: 서버 연결 실패, 주소 상태 확인 필요)")
         elif isinstance(e, requests.exceptions.HTTPError):
             status = getattr(e.response, 'status_code', '알수없음')
-            raise ConnectionError(f"{action_msg}\n(원인: 서버 응답 오류 HTTP {status})")
+            details = ""
+            try:
+                resp_json = e.response.json()
+                if "details" in resp_json:
+                    details = f"\n세부내용: {resp_json['details']}"
+            except:
+                pass
+            raise ConnectionError(f"{action_msg}\n(HTTP {status}){details}")
         else:
             raise ConnectionError(f"{action_msg}\n(원인: 알 수 없는 네트워크/파싱 오류)")
 
