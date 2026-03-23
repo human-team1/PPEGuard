@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from app.infrastructure.db.repositories.detection_result_repository import SQLAlchemyDetectionResultRepository
+from app.infrastructure.service_db.repositories.detection_result_repository import SQLAlchemyDetectionResultRepository
 from app.application.usecases.get_recent_results import GetRecentResultsUseCase
 from app.application.usecases.get_detection_result import GetDetectionResultUseCase
 from app.presentation.api.schemas.serializers import serialize

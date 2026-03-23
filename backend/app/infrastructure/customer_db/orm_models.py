@@ -3,7 +3,7 @@ from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
 
-from app.infrastructure.db.base import Base 
+from app.infrastructure.service_db.base import Base 
 
 class SourceType(enum.Enum):
     WEBCAM = "WEBCAM"

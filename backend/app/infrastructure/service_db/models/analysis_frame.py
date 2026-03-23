@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, DateTime, Numeric, String, ForeignKey
-from app.infrastructure.db.base import Base
+from app.infrastructure.service_db.base import Base
 
 class AnalysisFrameModel(Base):
     __tablename__ = "analysis_frame"

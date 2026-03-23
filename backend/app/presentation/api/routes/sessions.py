@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
-from app.infrastructure.db.repositories.analysis_session_repository import SQLAlchemyAnalysisSessionRepository
-from app.infrastructure.db.repositories.detection_result_repository import SQLAlchemyDetectionResultRepository
+from app.infrastructure.service_db.repositories.analysis_session_repository import SQLAlchemyAnalysisSessionRepository
+from app.infrastructure.service_db.repositories.detection_result_repository import SQLAlchemyDetectionResultRepository
 from app.application.usecases.start_analysis_session import StartAnalysisSessionUseCase
 from app.application.usecases.get_analysis_session import GetAnalysisSessionUseCase
 from app.application.usecases.stop_analysis_session import StopAnalysisSessionUseCase

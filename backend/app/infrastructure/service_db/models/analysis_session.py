@@ -1,5 +1,5 @@
 from sqlalchemy import Column, String, Integer, DateTime, BigInteger
-from app.infrastructure.db.base import Base
+from app.infrastructure.service_db.base import Base
 
 class AnalysisSessionModel(Base):
     __tablename__ = "analysis_session"
