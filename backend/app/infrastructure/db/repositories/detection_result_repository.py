@@ -4,14 +4,12 @@ from app.domain.ports.repository import DetectionResultRepository
 from app.infrastructure.db.models.detection_result import DetectionResultModel
 from app.infrastructure.db.session import SessionLocal
 
+# DetectionResult 엔티티와 ORM 모델을 연결하는 매핑 + 저장 repository
 class SQLAlchemyDetectionResultRepository(DetectionResultRepository):
-    def _to_domain(self, model: DetectionResultModel) -> DetectionResult:
+    def _to_domain(self, model):
         return DetectionResult(
             id=model.id,
-            session_id=model.session_id,
-            frame_no=model.frame_no,
-            frame_time_sec=Decimal(str(model.frame_time_sec)) if model.frame_time_sec is not None else None,
-            detected_at=model.detected_at,
+            frame_id=model.frame_id,
             person_index=model.person_index,
             employee_no=model.employee_no,
             ocr_text=model.ocr_text,
@@ -23,18 +21,15 @@ class SQLAlchemyDetectionResultRepository(DetectionResultRepository):
             person_box_y=model.person_box_y,
             person_box_width=model.person_box_width,
             person_box_height=model.person_box_height,
-            image_path=model.image_path,
+            crop_image_path=model.crop_image_path,
             created_at=model.created_at,
             updated_at=model.updated_at
         )
 
-    def _to_model(self, domain: DetectionResult) -> DetectionResultModel:
+    def _to_model(self, domain):
         return DetectionResultModel(
             id=domain.id,
-            session_id=domain.session_id,
-            frame_no=domain.frame_no,
-            frame_time_sec=domain.frame_time_sec,
-            detected_at=domain.detected_at,
+            frame_id=domain.frame_id,
             person_index=domain.person_index,
             employee_no=domain.employee_no,
             ocr_text=domain.ocr_text,
@@ -46,12 +41,12 @@ class SQLAlchemyDetectionResultRepository(DetectionResultRepository):
             person_box_y=domain.person_box_y,
             person_box_width=domain.person_box_width,
             person_box_height=domain.person_box_height,
-            image_path=domain.image_path,
+            crop_image_path=domain.crop_image_path,
             created_at=domain.created_at,
             updated_at=domain.updated_at
         )
 
-    def save(self, result: DetectionResult) -> None:
+    def save(self, result):
         with SessionLocal() as db_session:
             model = self._to_model(result)
             db_session.add(model)
@@ -59,17 +54,22 @@ class SQLAlchemyDetectionResultRepository(DetectionResultRepository):
             db_session.refresh(model)
             result.id = model.id
 
-    def find_by_session_id(self, session_id: int) -> list[DetectionResult]:
+    def find_by_frame_id(self, frame_id):
         with SessionLocal() as db_session:
-            models = db_session.query(DetectionResultModel).filter_by(session_id=session_id).all()
+            models = db_session.query(DetectionResultModel).filter_by(frame_id=frame_id).all()
             return [self._to_domain(m) for m in models]
 
-    def find_recent(self, limit: int) -> list[DetectionResult]:
+    def find_recent(self, limit):
         with SessionLocal() as db_session:
-            models = db_session.query(DetectionResultModel).order_by(DetectionResultModel.created_at.desc()).limit(limit).all()
+            models = (
+                db_session.query(DetectionResultModel)
+                .order_by(DetectionResultModel.created_at.desc())
+                .limit(limit)
+                .all()
+            )
             return [self._to_domain(m) for m in models]
 
-    def find_by_id(self, id: int) -> DetectionResult | None:
+    def find_by_id(self, id):
         with SessionLocal() as db_session:
             model = db_session.query(DetectionResultModel).filter_by(id=id).first()
             if model:

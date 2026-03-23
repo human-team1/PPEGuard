@@ -15,13 +15,11 @@ class StartSessionCommand:
 
 @dataclass
 class ProcessDetectionCommand:
-    session_id: str
-    detected_at: datetime
+    session_id: str # analysis_session.session_id (세션 카운트 갱신용)
+    frame_id: int   # analysis_frame.id
     person_index: int
     helmet_status: ItemWearStatus
     vest_status: ItemWearStatus
-    frame_no: Optional[int] = None
-    frame_time_sec: Optional[Decimal] = None
     employee_no: Optional[str] = None
     ocr_text: Optional[str] = None
     ocr_confidence: Optional[Decimal] = None
@@ -29,4 +27,4 @@ class ProcessDetectionCommand:
     person_box_y: Optional[int] = None
     person_box_width: Optional[int] = None
     person_box_height: Optional[int] = None
-    image_path: Optional[str] = None
+    crop_image_path: Optional[str] = None

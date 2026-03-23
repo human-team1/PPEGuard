@@ -1,9 +1,9 @@
-from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Enum, DECIMAL, ForeignKey, Text
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy import Column, Integer, BigInteger, String, DateTime, DECIMAL, ForeignKey
+from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
 
-Base = declarative_base()
+from app.infrastructure.db.base import Base 
 
 class SourceType(enum.Enum):
     WEBCAM = "WEBCAM"

@@ -1,3 +1,7 @@
-from .repository import AnalysisSessionRepository, DetectionResultRepository
+from .repository import AnalysisSessionRepository, AnalysisFrameRepository, DetectionResultRepository
 
-__all__ = ["AnalysisSessionRepository", "DetectionResultRepository"]
+__all__ = [
+    "AnalysisSessionRepository",
+    "AnalysisFrameRepository",
+    "DetectionResultRepository",
+]
