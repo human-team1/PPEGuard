@@ -34,7 +34,7 @@ class WearStatus(enum.Enum):
 class AnalysisSessionORM(Base):
     __tablename__ = 'analysis_session'
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(String(50), nullable=False, unique=True, index=True)
     source_type = Column(String(20), nullable=False)
     source_name = Column(String(255), nullable=True)
@@ -55,8 +55,8 @@ class AnalysisSessionORM(Base):
 class AnalysisFrameORM(Base):
     __tablename__ = 'analysis_frame'
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    session_id = Column(BigInteger, ForeignKey('analysis_session.id'), nullable=False)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(Integer, ForeignKey('analysis_session.id'), nullable=False)
     frame_no = Column(Integer, nullable=False, index=True)
     frame_time_sec = Column(DECIMAL(10, 2), nullable=False, index=True)
     captured_at = Column(DateTime, nullable=True)
@@ -73,8 +73,8 @@ class AnalysisFrameORM(Base):
 class DetectionResultORM(Base):
     __tablename__ = 'detection_result'
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    frame_id = Column(BigInteger, ForeignKey('analysis_frame.id'), nullable=False)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    frame_id = Column(Integer, ForeignKey('analysis_frame.id'), nullable=False)
     person_index = Column(Integer, nullable=False)
     employee_no = Column(String(50), nullable=True, index=True)
     ocr_text = Column(String(255), nullable=True)
