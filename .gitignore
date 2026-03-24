@@ -27,3 +27,11 @@ dist/
 node_modules/
 frontend/node_modules/
 frontend/dist/
+
+# uploaded/generated files
+backend/uploads/crops/*
+backend/uploads/videos/*
+
+# keep directory
+!backend/uploads/crops/.gitkeep
+!backend/uploads/videos/.gitkeep
