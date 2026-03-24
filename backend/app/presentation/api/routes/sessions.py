@@ -80,7 +80,11 @@ def stop_session(session_id: str):
 
 @sessions_bp.route('/<session_id>/results', methods=['GET'])
 def get_session_results(session_id: str):
-    usecase = GetSessionResultsUseCase(get_session_repo(), get_result_repo())
+    usecase = GetSessionResultsUseCase(
+        get_session_repo(),
+        get_result_repo(),
+        get_frame_repo(),
+        )
     try:
         results = usecase.execute(session_id)
         return jsonify(serialize(results)), 200

@@ -26,7 +26,7 @@ class AnalysisFrameRepository(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def find_by_id(self, frame_id: int):
+    def find_by_id(self, frame_id: int): # analysis_session.id (내부 PK) 기준으로 frame 목록 조회
         pass
 
     @abc.abstractmethod
@@ -35,19 +35,19 @@ class AnalysisFrameRepository(abc.ABC):
 
 class DetectionResultRepository(abc.ABC):
     @abc.abstractmethod
-    def save(self, frame: DetectionResult):
+    def save(self, result: DetectionResult):
         pass
 
     @abc.abstractmethod
-    def update(self, frame: DetectionResult):
+    def find_by_id(self, result_id: int):
         pass
 
     @abc.abstractmethod
-    def find_by_id(self, frame_id: int):
+    def find_by_frame_id(self, frame_id: int):
         pass
 
     @abc.abstractmethod
-    def find_by_session_id(self, session_id: int):
+    def find_recent(self, limit: int):
         pass
 
 
