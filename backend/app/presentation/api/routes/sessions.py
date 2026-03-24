@@ -1,12 +1,17 @@
 from flask import Blueprint, request, jsonify
+
 from app.infrastructure.service_db.repositories.analysis_session_repository import SQLAlchemyAnalysisSessionRepository
+from app.infrastructure.service_db.repositories.analysis_frame_repository import SQLAlchemyAnalysisFrameRepository
 from app.infrastructure.service_db.repositories.detection_result_repository import SQLAlchemyDetectionResultRepository
 from app.infrastructure.customer_db.repositories.customer_detection_result_repository_impl import SQLAlchemyCustomerDetectionResultRepository
+
 from app.application.usecases.start_analysis_session import StartAnalysisSessionUseCase
 from app.application.usecases.get_analysis_session import GetAnalysisSessionUseCase
 from app.application.usecases.stop_analysis_session import StopAnalysisSessionUseCase
 from app.application.usecases.get_session_results import GetSessionResultsUseCase
+from app.application.usecases.get_session_frames import GetSessionFramesUseCase
 from app.application.usecases.process_detection_result import ProcessDetectionResultUseCase
+
 from app.application.dtos import StartSessionCommand, ProcessDetectionCommand
 from app.domain.entities.analysis_session import AnalysisSourceType
 from app.domain.entities.detection_result import ItemWearStatus
@@ -16,6 +21,9 @@ sessions_bp = Blueprint('sessions', __name__, url_prefix='/api/v1/sessions')
 
 def get_session_repo():
     return SQLAlchemyAnalysisSessionRepository()
+
+def get_frame_repo():
+    return SQLAlchemyAnalysisFrameRepository()
 
 def get_result_repo():
     return SQLAlchemyDetectionResultRepository()
@@ -29,7 +37,7 @@ def create_session():
     try:
         source_type_str = data.get('source_type', 'WEBCAM')
         source_type = AnalysisSourceType[source_type_str]
-        
+
         cmd = StartSessionCommand(
             source_type=source_type,
             frame_interval_sec=int(data.get('frame_interval_sec', 3)),
@@ -41,7 +49,7 @@ def create_session():
 
     usecase = StartAnalysisSessionUseCase(get_session_repo())
     session = usecase.execute(cmd)
-    
+
     return jsonify(serialize(session)), 201
 
 @sessions_bp.route('/<session_id>', methods=['GET'])
@@ -51,6 +59,15 @@ def get_session(session_id: str):
     if not session:
         return jsonify({"error": "Session not found"}), 404
     return jsonify(serialize(session)), 200
+
+@sessions_bp.route('/<session_id>/frames', methods=['GET'])
+def get_session_frames(session_id: str):
+    usecase = GetSessionFramesUseCase(get_session_repo(), get_frame_repo())
+    try:
+        frames = usecase.execute(session_id)
+        return jsonify(serialize(frames)), 200
+    except ValueError:
+        return jsonify({"error": "Session not found"}), 404
 
 @sessions_bp.route('/<session_id>/stop', methods=['POST'])
 def stop_session(session_id: str):
@@ -63,7 +80,11 @@ def stop_session(session_id: str):
 
 @sessions_bp.route('/<session_id>/results', methods=['GET'])
 def get_session_results(session_id: str):
-    usecase = GetSessionResultsUseCase(get_session_repo(), get_result_repo())
+    usecase = GetSessionResultsUseCase(
+        get_session_repo(),
+        get_result_repo(),
+        get_frame_repo(),
+        )
     try:
         results = usecase.execute(session_id)
         return jsonify(serialize(results)), 200
@@ -92,14 +113,13 @@ def process_result(session_id: str):
     except Exception as e:
         return jsonify({"error": "Bad Request", "details": str(e)}), 400
 
-    from app.infrastructure.service_db.repositories.analysis_frame_repository import SQLAlchemyAnalysisFrameRepository
     usecase = ProcessDetectionResultUseCase(
         session_repo=get_session_repo(),
-        frame_repo=SQLAlchemyAnalysisFrameRepository(),
+        frame_repo=get_frame_repo(),
         result_repo=get_result_repo(),
         customer_result_repo=get_customer_result_repo()
     )
-    
+
     try:
         result = usecase.execute(cmd)
         return jsonify(serialize(result)), 201

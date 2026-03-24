@@ -5,7 +5,7 @@ from app.infrastructure.service_db.models.analysis_frame import AnalysisFrameMod
 from app.infrastructure.service_db.session import SessionLocal
 
 class SQLAlchemyAnalysisFrameRepository(AnalysisFrameRepository):
-    def _to_domain(self, model: AnalysisFrameModel) -> AnalysisFrame:
+    def _to_domain(self, model: AnalysisFrameModel): 
         return AnalysisFrame(
             id=model.id,
             session_id=model.session_id,
@@ -20,7 +20,7 @@ class SQLAlchemyAnalysisFrameRepository(AnalysisFrameRepository):
             updated_at=model.updated_at,
         )
 
-    def _to_model(self, domain: AnalysisFrame) -> AnalysisFrameModel:
+    def _to_model(self, domain: AnalysisFrame): 
         return AnalysisFrameModel(
             id=domain.id,
             session_id=domain.session_id,
@@ -35,7 +35,7 @@ class SQLAlchemyAnalysisFrameRepository(AnalysisFrameRepository):
             updated_at=domain.updated_at,
         )
 
-    def save(self, frame: AnalysisFrame) -> None:
+    def save(self, frame: AnalysisFrame): 
         with SessionLocal() as db_session:
             model = self._to_model(frame)
             db_session.add(model)
@@ -43,7 +43,7 @@ class SQLAlchemyAnalysisFrameRepository(AnalysisFrameRepository):
             db_session.refresh(model)
             frame.id = model.id
 
-    def update(self, frame: AnalysisFrame) -> None:
+    def update(self, frame: AnalysisFrame): 
         with SessionLocal() as db_session:
             model = db_session.query(AnalysisFrameModel).filter_by(id=frame.id).first()
             if model:
@@ -55,14 +55,14 @@ class SQLAlchemyAnalysisFrameRepository(AnalysisFrameRepository):
                 model.updated_at = frame.updated_at
                 db_session.commit()
 
-    def find_by_id(self, id: int) -> AnalysisFrame | None:
+    def find_by_id(self, id: int): 
         with SessionLocal() as db_session:
             model = db_session.query(AnalysisFrameModel).filter_by(id=id).first()
             if model:
                 return self._to_domain(model)
             return None
 
-    def find_by_session_id(self, session_id: int) -> list[AnalysisFrame]:
+    def find_by_session_id(self, session_id: int): 
         with SessionLocal() as db_session:
             models = (
                 db_session.query(AnalysisFrameModel)

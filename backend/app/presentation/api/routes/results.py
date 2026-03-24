@@ -22,8 +22,10 @@ def get_recent_results():
 
 @results_bp.route('/<int:result_id>', methods=['GET'])
 def get_result(result_id: int):
-    usecase = GetDetectionResultUseCase(get_result_repo())
-    result = usecase.execute(result_id)
-    if not result:
+    usecase = GetDetectionResultUseCase(get_result_repo()) 
+
+    try:
+        result = usecase.execute(result_id)
+        return jsonify(serialize(result)), 200
+    except ValueError:
         return jsonify({"error": "Result not found"}), 404
-    return jsonify(serialize(result)), 200

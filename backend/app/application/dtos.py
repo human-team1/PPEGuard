@@ -2,7 +2,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
-from ..domain.entities.analysis_session import AnalysisSourceType
+from ..domain.entities.analysis_session import AnalysisSourceType, AnalysisSessionStatus 
+from ..domain.entities.analysis_frame import FrameProcessingStatus
 from ..domain.entities.detection_result import ItemWearStatus
 
 @dataclass
@@ -28,3 +29,39 @@ class ProcessDetectionCommand:
     person_box_width: Optional[int] = None
     person_box_height: Optional[int] = None
     crop_image_path: Optional[str] = None
+
+# 응답 DTO 추가  
+@dataclass
+class AnalysisSessionResponseDto:
+    session_id: str
+    source_type: str
+    source_name: Optional[str]
+    status: str
+    frame_interval_sec: int
+    total_frames: Optional[int]
+    processed_frames: int
+    detected_count: int
+    requested_by: Optional[str]
+    started_at: Optional[datetime]
+    finished_at: Optional[datetime]
+    fail_reason: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+@dataclass
+class AnalysisFrameItemResponseDto:
+    frame_id: int
+    frame_no: int
+    frame_time_sec: Decimal
+    captured_at: Optional[datetime]
+    frame_image_path: Optional[str]
+    person_count: int
+    processing_status: str
+    error_message: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+@dataclass
+class AnalysisFrameListResponseDto:
+    session_id: str
+    frames: list[AnalysisFrameItemResponseDto] 
