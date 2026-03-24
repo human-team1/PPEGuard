@@ -28,3 +28,7 @@ class ProcessDetectionCommand:
     person_box_width: Optional[int] = None
     person_box_height: Optional[int] = None
     crop_image_path: Optional[str] = None
+
+@dataclass
+class AnalyzeFrameCommand:
+    image_base64: str
