@@ -39,7 +39,7 @@ _(기본적으로 `sqlite:///./ppe_guard.db` 환경 및 포트 5000으로 설정
 ### 3.1 DB 초기화 
 먼저 관리용 서비스 DB 파일과 내부 테이블을 최초 1회 생성해야 합니다.
 ```bash
-python -m app.infrastructure.db.init_db
+python -m app.infrastructure.service_db.init_db
 ```
 *(성공 시 `ppe_guard.db` 파일이 생성됩니다.)*
 
