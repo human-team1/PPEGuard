@@ -30,6 +30,10 @@ class ProcessDetectionCommand:
     person_box_height: Optional[int] = None
     crop_image_path: Optional[str] = None
 
+@dataclass
+class AnalyzeFrameCommand:
+    image_base64: str
+    
 # 응답 DTO 추가  
 @dataclass
 class AnalysisSessionResponseDto:

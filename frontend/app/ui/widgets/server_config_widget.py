@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, 
     QLineEdit, QPushButton, QMessageBox, QGroupBox
 )
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Slot
 from app.config.settings import AppSettings
 from app.services.api_client import ApiClient
 
@@ -21,8 +21,12 @@ class ServerConfigWidget(QGroupBox):
         layout = QHBoxLayout()
         
         self.url_input = QLineEdit()
+        # [변경: placeholder와 기본값을 5000 포트로 유도]
         self.url_input.setPlaceholderText("예: http://127.0.0.1:5000")
-        self.url_input.setText(self.settings.get_server_url())
+        
+        # QSettings에 저장된 주소가 있으면 그걸 쓰고, 없으면 5000 기본으로 채웁니다.
+        current_url = self.settings.get_server_url()
+        self.url_input.setText(current_url)
         
         self.connect_btn = QPushButton("연결 테스트")
         self.connect_btn.clicked.connect(self._test_connection)
@@ -46,6 +50,7 @@ class ServerConfigWidget(QGroupBox):
         self.status_label.setStyleSheet("color: gray;")
         self.connection_status_changed.emit(False)
         
+    @Slot()
     def _test_connection(self):
         url = self.url_input.text().strip()
         if not url:
@@ -60,6 +65,8 @@ class ServerConfigWidget(QGroupBox):
         self.api_client.update_base_url(url)
         
         try:
+            # [추가: 실시간 분석을 위한 소켓 주소도 함께 5000 등 입력된 포트로 동적 업데이트 필요 시점]
+            # (현재는 ApiClient의 health check를 먼저 수행)
             res = self.api_client.check_health()
             if res.get("status") == "healthy":
                 self.is_connected = True
@@ -73,7 +80,8 @@ class ServerConfigWidget(QGroupBox):
             self.is_connected = False
             self.status_label.setText("상태: 연결 실패")
             self.status_label.setStyleSheet("color: red;")
-            QMessageBox.critical(self, "오류", f"연결 테스트 실패:\n{str(e)}")
+            # 에러 메시지의 포트 번호를 확인하여 사용자에게 가이드 유도
+            QMessageBox.critical(self, "오류", f"연결 테스트 실패(포트 {url} 확인 요망):\n{str(e)}")
         finally:
             self.connect_btn.setEnabled(True)
             self.connection_status_changed.emit(self.is_connected)
