@@ -33,6 +33,17 @@ class Config:
     AI_OCR_PROVIDER = os.getenv("AI_OCR_PROVIDER", "mock")
     FRAME_INTERVAL_SEC = int(os.getenv("FRAME_INTERVAL_SEC", "3"))
 
+    YOLO_MODEL_PATH = os.getenv(
+        "YOLO_MODEL_PATH",
+        str(BASE_DIR / "app" / "infrastructure" / "ai_analyzer" / "models" / "best.pt"),
+    )
+
+    YOLO_TRACKER_CONFIG = os.getenv(
+        "YOLO_TRACKER_CONFIG",
+        str(BASE_DIR / "app" / "infrastructure" / "ai_analyzer" / "configs" / "bytetrack.yaml"),
+    )
+
+
 class DevelopmentConfig(Config):
     DEBUG = True
 
