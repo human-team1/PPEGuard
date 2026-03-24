@@ -1,15 +1,17 @@
+import os
 import requests
 from typing import Dict, Any
 
+
 class ApiClient:
     """Flask 백엔드와 통신하는 API 클라이언트"""
-    
+
     def __init__(self, base_url: str):
         self.base_url = base_url.rstrip("/")
-        
+
     def update_base_url(self, base_url: str):
         self.base_url = base_url.rstrip("/")
-        
+
     def _handle_request_error(self, e: Exception, action_msg: str):
         """사용자용 안내 메시지와 원인 파악용 에러 코드를 분리하여 포맷팅하는 유틸리티"""
         if isinstance(e, requests.exceptions.Timeout):
@@ -17,8 +19,15 @@ class ApiClient:
         elif isinstance(e, requests.exceptions.ConnectionError):
             raise ConnectionError(f"{action_msg}\n(원인: 서버 연결 실패, 주소 상태 확인 필요)")
         elif isinstance(e, requests.exceptions.HTTPError):
-            status = getattr(e.response, 'status_code', '알수없음')
-            raise ConnectionError(f"{action_msg}\n(원인: 서버 응답 오류 HTTP {status})")
+            status = getattr(e.response, "status_code", "알수없음")
+            details = ""
+            try:
+                resp_json = e.response.json()
+                if "details" in resp_json:
+                    details = f"\n세부내용: {resp_json['details']}"
+            except:
+                pass
+            raise ConnectionError(f"{action_msg}\n(HTTP {status}){details}")
         else:
             raise ConnectionError(f"{action_msg}\n(원인: 알 수 없는 네트워크/파싱 오류)")
 
@@ -27,12 +36,17 @@ class ApiClient:
         url = f"{self.base_url}/health"
         try:
             response = requests.get(url, timeout=3)
-            response.raise_for_status() 
+            response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
             self._handle_request_error(e, "서버 헬스체크 연결에 실패했습니다.")
-            
-    def start_session(self, source_type: str, source_name: str, frame_interval: int = 3) -> Dict[str, Any]:
+
+    def start_session(
+        self,
+        source_type: str,
+        source_name: str,
+        frame_interval: int = 3
+    ) -> Dict[str, Any]:
         """분석 세션 생성 (POST /api/v1/sessions)"""
         url = f"{self.base_url}/api/v1/sessions"
         payload = {
@@ -47,6 +61,24 @@ class ApiClient:
             return response.json()
         except requests.exceptions.RequestException as e:
             self._handle_request_error(e, "분석 세션 생성을 요청하지 못했습니다.")
+
+    def upload_video(self, video_path: str) -> Dict[str, Any]:
+        """동영상 업로드 요청 (POST /api/v1/video)"""
+        url = f"{self.base_url}/api/v1/video"
+
+        if not os.path.exists(video_path):
+            raise ConnectionError("선택한 동영상 파일을 찾을 수 없습니다.")
+
+        try:
+            with open(video_path, "rb") as video_file:
+                files = {
+                    "file": (os.path.basename(video_path), video_file, "video/mp4")
+                }
+                response = requests.post(url, files=files, timeout=30)
+                response.raise_for_status()
+                return response.json()
+        except requests.exceptions.RequestException as e:
+            self._handle_request_error(e, "동영상 업로드 요청에 실패했습니다.")
 
     def get_results(self, limit: int = 50) -> list:
         """결과 목록 최신순 조회 (GET /api/v1/results)"""

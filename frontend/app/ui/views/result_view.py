@@ -15,24 +15,28 @@ class ResultView(QWidget):
         
     def _init_ui(self):
         layout = QHBoxLayout(self)
+        layout.setSpacing(10)
         
         # 좌측: 목록 및 제어
         left_layout = QVBoxLayout()
-        self.refresh_btn = QPushButton("서버에서 최신 결과 불러오기")
+        left_layout.setSpacing(5)
+        
+        self.refresh_btn = QPushButton("분석 내역 새로고침")
         self.refresh_btn.setMinimumHeight(30)
+        self.refresh_btn.setStyleSheet("font-weight: bold;")
         self.refresh_btn.clicked.connect(self.load_results)
         
         self.list_widget = ResultListWidget()
         self.list_widget.item_selected.connect(self._on_item_selected)
         
         left_layout.addWidget(self.refresh_btn)
-        left_layout.addWidget(self.list_widget)
+        left_layout.addWidget(self.list_widget, stretch=1)
         
         # 우측: 단건 디테일 출력
         self.detail_widget = ResultDetailWidget()
         
         layout.addLayout(left_layout, stretch=1)
-        layout.addWidget(self.detail_widget, stretch=2)
+        layout.addWidget(self.detail_widget, stretch=1)
         
     def load_results(self):
         self.refresh_btn.setEnabled(False)

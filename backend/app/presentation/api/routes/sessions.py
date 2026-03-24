@@ -126,4 +126,5 @@ def process_result(session_id: str):
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
     except Exception as e:
+
         return jsonify({"error": "Internal Server Error", "details": str(e)}), 500
