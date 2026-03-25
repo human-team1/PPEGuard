@@ -32,12 +32,7 @@ class ProcessDetectionCommand:
     person_box_height: Optional[int] = None
     crop_image_path: Optional[str] = None
 
-@dataclass
-class AnalyzeFrameCommand:
-    image_base64: str
-    session_id: Optional[str] = None
-    
-# 응답 DTO 추가  
+
 @dataclass
 class AnalysisSessionResponseDto:
     session_id: str
@@ -80,3 +75,4 @@ class AnalysisFrameListResponseDto:
 @dataclass
 class AnalyzeFrameCommand:
     image_base64: str
+    session_id: Optional[str] = None

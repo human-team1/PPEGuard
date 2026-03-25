@@ -37,7 +37,7 @@ class Config:
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads"))
     AI_DETECTOR_PROVIDER = os.getenv("AI_DETECTOR_PROVIDER", "mock")
     AI_OCR_PROVIDER = os.getenv("AI_OCR_PROVIDER", "mock")
-    FRAME_INTERVAL_SEC = int(os.getenv("FRAME_INTERVAL_SEC", "3"))
+    FRAME_INTERVAL_SEC = int(os.getenv("FRAME_INTERVAL_SEC", "1"))
 
     YOLO_MODEL_PATH = os.getenv(
         "YOLO_MODEL_PATH",

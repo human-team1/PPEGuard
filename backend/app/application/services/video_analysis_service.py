@@ -48,7 +48,7 @@ class VideoAnalysisService:
         os.makedirs(self.upload_dir, exist_ok=True)
         os.makedirs(self.crop_dir, exist_ok=True)
 
-    def execute(self, video_file, requested_by: str = "desktop-client", frame_interval_sec: int = 3):
+    def execute(self, video_file, requested_by: str = "desktop-client", frame_interval_sec: int | None = None):
         print("[VideoAnalysis] execute 시작")
 
         if video_file is None: 
@@ -73,10 +73,10 @@ class VideoAnalysisService:
             fps = 30.0
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        frame_step = max(int(fps * frame_interval_sec), 3)
 
-        # # YOLO 처리 주기: 2fps
-        # frame_step = max(int(fps / 2), 1)
+
+        # YOLO 처리 주기: 2fps
+        frame_step = max(int(fps / 2), 1)
 
         start_cmd = StartSessionCommand(
             source_type=AnalysisSourceType.VIDEO_FILE,
@@ -87,6 +87,7 @@ class VideoAnalysisService:
         )
         session = self.start_analysis_session_usecase.execute(start_cmd)
         session_id = session.session_id
+
 
         # 1분 구간별 OCR 저장 프레임 관리
         # { minute_bucket: [ {path, score, track_id, employee_no, frame_no}, ... ] }
@@ -212,6 +213,7 @@ class VideoAnalysisService:
                         crop_image_path=crop_image_path,
                     )
 
+
                     # [Log] 프레임별 신뢰도 출력
                     print(f"      - [FrameLog] Person {person.id}: Helmet={person.helmet_confidence:.2f}, Vest={person.vest_confidence:.2f}")
 
@@ -221,6 +223,8 @@ class VideoAnalysisService:
                         "helmet_conf": person.helmet_confidence,
                         "vest_conf": person.vest_confidence
                     })
+
+                    self.process_detection_result_usecase.execute(cmd)
 
                 ocr_all_identified = (
                     len(people) > 0
@@ -254,6 +258,7 @@ class VideoAnalysisService:
             self.fail_analysis_session_usecase.execute(session_id, str(e))
             raise
 
+
     def _aggregate_and_save(self, buffer: dict):
         """버퍼링된 프레임 데이터를 정산하여 DB에 저장합니다."""
         for p_id, frames_data in buffer.items():
@@ -275,6 +280,7 @@ class VideoAnalysisService:
             self.process_detection_result_usecase.execute(final_cmd)
             print(f"[VideoAnalysis] 정산 결과 저장 완료 - Person ID: {p_id}, "
                   f"Helmet_Avg: {avg_helmet_conf:.2f}, Vest_Avg: {avg_vest_conf:.2f}")
+
     def _is_person_identified(self, person) -> bool:
         return bool(getattr(person, "ocr_confirmed", False) and getattr(person, "employee_no", None))
 
