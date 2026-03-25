@@ -1,7 +1,7 @@
-# [변경: WebSocket 클라이언트 지원을 위해 라이브러리 추가]
+﻿# [변경: WebSocket 클라이언트 지원을 위해 라이브러리 추가]
 # python-socketio (클라이언트용), 파이썬 환경에서 소켓 통신을 위해 사용
 PySide6>=6.5.0
 requests>=2.30.0
 opencv-python>=4.8.0
-python-socketio[client]==5.10.0
+python-socketio==5.11.4
 numpy>=1.24.0
