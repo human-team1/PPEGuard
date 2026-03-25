@@ -42,6 +42,7 @@ class Config:
     YOLO_MODEL_PATH = os.getenv(
         "YOLO_MODEL_PATH",
         str(BASE_DIR / "app" / "infrastructure" / "ai_analyzer" / "models" / "best.pt"),
+        # str(BASE_DIR / "app" / "infrastructure" / "ai_analyzer" / "models" / "yolo11s_ft_aug_best.pt"),
     )
 
     YOLO_TRACKER_CONFIG = os.getenv(

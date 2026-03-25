@@ -75,3 +75,4 @@ class AnalysisFrameListResponseDto:
 @dataclass
 class AnalyzeFrameCommand:
     image_base64: str
+    session_id: Optional[str] = None

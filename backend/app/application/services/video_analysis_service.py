@@ -2,6 +2,8 @@ import os
 import re
 import uuid
 import cv2
+import collections
+
 from collections import defaultdict
 from config.settings import Config
 from app.application.dtos import StartSessionCommand, ProcessDetectionCommand
@@ -49,7 +51,8 @@ class VideoAnalysisService:
     def execute(self, video_file, requested_by: str = "desktop-client", frame_interval_sec: int | None = None):
         print("[VideoAnalysis] execute 시작")
 
-        if video_file is None:
+        if video_file is None: 
+            print("[VideoAnalysis] 실패 - 업로드 파일 없음")
             raise ValueError("업로드 파일이 없습니다.")
 
         original_filename = video_file.filename or ""
@@ -71,6 +74,7 @@ class VideoAnalysisService:
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
 
+
         # YOLO 처리 주기: 2fps
         frame_step = max(int(fps / 2), 1)
 
@@ -84,11 +88,24 @@ class VideoAnalysisService:
         session = self.start_analysis_session_usecase.execute(start_cmd)
         session_id = session.session_id
 
+
         # 1분 구간별 OCR 저장 프레임 관리
         # { minute_bucket: [ {path, score, track_id, employee_no, frame_no}, ... ] }
         minute_frame_store = defaultdict(list)
-
         try:
+            # 영상이 몇 프레임인 지 파악
+            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0 # 초당 프레임 수
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0) # 전체 프레임 수
+            duration_sec = total_frames / fps if fps > 0 else 0 # 영상 길이
+            
+            # [Step 1 & 2] 분석 데이터 버퍼링 설정 (60초 기준)
+            is_short_video = duration_sec <= 60.0
+            results_buffer = collections.defaultdict(list) # person_id -> list of detection data
+
+            # [Step 2] 60초 단위 Chunk 관리를 위한 변수
+            current_chunk_start_time = 0.0
+            CHUNK_INTERVAL = 10.0
+
             current_frame_no = 0
             processed_frame_count = 0
 
@@ -102,6 +119,14 @@ class VideoAnalysisService:
                     break
 
                 current_frame_no += 1
+                current_time_sec = current_frame_no / fps
+
+                # [Step 2] 60초 초과 영상에 대한 Chunk 정산 처리
+                if not is_short_video and (current_time_sec - current_chunk_start_time >= CHUNK_INTERVAL):
+                    print(f"[VideoAnalysis] 60초 Chunk 정산 시작 ({current_chunk_start_time:.1f}s ~ {current_time_sec:.1f}s)")
+                    self._aggregate_and_save(results_buffer)
+                    results_buffer.clear()
+                    current_chunk_start_time = current_time_sec
 
                 if current_frame_no % frame_step != 0:
                     continue
@@ -188,6 +213,17 @@ class VideoAnalysisService:
                         crop_image_path=crop_image_path,
                     )
 
+
+                    # [Log] 프레임별 신뢰도 출력
+                    print(f"      - [FrameLog] Person {person.id}: Helmet={person.helmet_confidence:.2f}, Vest={person.vest_confidence:.2f}")
+
+                    # [Step 1 / Step 2] 버퍼에 누적 (즉시 저장하지 않음)
+                    results_buffer[person.id].append({
+                        "cmd": cmd,
+                        "helmet_conf": person.helmet_confidence,
+                        "vest_conf": person.vest_confidence
+                    })
+
                     self.process_detection_result_usecase.execute(cmd)
 
                 ocr_all_identified = (
@@ -204,6 +240,11 @@ class VideoAnalysisService:
                     target_minute_bucket=last_cleaned_minute_bucket,
                 )
 
+            # [최종 정산] 남은 데이터 처리 (짧은 영상 전체 또는 긴 영상의 마지막 자투리 Chunk)
+            if results_buffer:
+                print(f"[VideoAnalysis] 최종/남은 구간 정산 처리 시작 (인원수: {len(results_buffer)})")
+                self._aggregate_and_save(results_buffer)
+
             self.complete_analysis_session_usecase.execute(
                 session_id=session_id,
                 processed_frames=processed_frame_count,
@@ -216,6 +257,29 @@ class VideoAnalysisService:
             cap.release()
             self.fail_analysis_session_usecase.execute(session_id, str(e))
             raise
+
+
+    def _aggregate_and_save(self, buffer: dict):
+        """버퍼링된 프레임 데이터를 정산하여 DB에 저장합니다."""
+        for p_id, frames_data in buffer.items():
+            if not frames_data:
+                continue
+                
+            avg_helmet_conf = sum(d['helmet_conf'] for d in frames_data) / len(frames_data)
+            avg_vest_conf = sum(d['vest_conf'] for d in frames_data) / len(frames_data)
+
+            # [Log] 정산 구간 평균 신뢰도 출력
+            print(f"  ==> [AggregationLog] Person {p_id} (Data Count: {len(frames_data)}): "
+                  f"Avg Helmet={avg_helmet_conf:.4f}, Avg Vest={avg_vest_conf:.4f}")
+            
+            # 신뢰도 기반 최종 판정 (0.8 이상일 때만 WEARING으로 인정)
+            final_cmd = frames_data[-1]['cmd']
+            final_cmd.helmet_status = ItemWearStatus.WEARING if avg_helmet_conf >= 0.7 else ItemWearStatus.NOT_WEARING
+            final_cmd.vest_status = ItemWearStatus.WEARING if avg_vest_conf >= 0.7 else ItemWearStatus.NOT_WEARING
+            
+            self.process_detection_result_usecase.execute(final_cmd)
+            print(f"[VideoAnalysis] 정산 결과 저장 완료 - Person ID: {p_id}, "
+                  f"Helmet_Avg: {avg_helmet_conf:.2f}, Vest_Avg: {avg_vest_conf:.2f}")
 
     def _is_person_identified(self, person) -> bool:
         return bool(getattr(person, "ocr_confirmed", False) and getattr(person, "employee_no", None))

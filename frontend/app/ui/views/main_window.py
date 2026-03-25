@@ -77,6 +77,11 @@ class MainWindow(QMainWindow):
             self.worker.start()
             return
 
+        # (qthread)[Bug Fix] 이미 워커가 작동 중이면 중복 실행 방지 및 안전하게 해제
+        if self.worker and self.worker.isRunning():
+            print("[GUI] 기존 작업이 아직 실행 중입니다. 대기 혹은 종료 처리합니다.")
+            self.worker.wait(1000) # 안전을 위해 1초 대기
+
         self.status_widget.show_loading("분석 세션 생성을 요청 중입니다...")
 
         source_name = "Webcam-Live"
@@ -102,6 +107,11 @@ class MainWindow(QMainWindow):
 
         self.status_widget.show_success(f"생성 완료: [{session_id[:8]}] - 상태: {status}")
         self.input_widget.start_btn.setEnabled(True)
+        
+        # [Step 2 지원] 웹캠 소켓 서비스에 세션 ID 주입
+        if hasattr(self.input_widget, 'webcam_preview'):
+            self.input_widget.webcam_preview.socket_service.session_id = session_id
+            
         self.result_view.load_results()
 
     def _on_session_error(self, err_msg: str):
