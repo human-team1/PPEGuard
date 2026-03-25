@@ -14,6 +14,9 @@ class Person:
     ocr_confirmed: bool = False
     last_ocr_at_sec: Optional[float] = None
     ocr_candidate_counts: dict[str, int] = field(default_factory=dict)
+    latest_ocr_candidate: Optional[str] = None
+    latest_ocr_regex_matched: bool = False
+    latest_ocr_raw_text: Optional[str] = None
 
     has_vest: bool = False
     has_helmet: bool = False

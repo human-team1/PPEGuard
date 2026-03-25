@@ -1,101 +1,170 @@
 import time
-import collections
-from typing import Dict, Any, Optional
-from ..dtos import AnalyzeFrameCommand, ProcessDetectionCommand
+from typing import Dict, Any
+
+from ..dtos import AnalyzeFrameCommand
 from ..services.analyze_worker_service import AnalyzeWorker
 from ...domain.entities.person import Person
-from ...domain.entities.detection_result import ItemWearStatus
+
 
 class AnalyzeFrameUseCase:
-    """
-    [실시간 소켓 전용 유스케이스]
-    - Presentation(소켓 핸들러)으로부터 전달받은 DTO(AnalyzeFrameCommand)를 비즈니스 로직으로 변환하여 실행합니다.
-    - 데이터 전처리는 주입받은 AnalyzeWorker(Service)에 위임합니다.
-    - [Step 2] 웹캠 세션에 대해 주기로 데이터를 집계하여 DB에 저장합니다.
-    """
-    def __init__(self, analyze_worker: AnalyzeWorker, process_result_usecase=None):
+    def __init__(
+        self,
+        analyze_worker: AnalyzeWorker,
+        session_repo=None,
+        ocr_service=None,
+        ocr_engine=None,
+        segment_result_service=None,
+        realtime_event_service=None,
+    ):
         self.analyze_worker = analyze_worker
-        self.process_result_usecase = process_result_usecase
-        
-        # [Step 2 지원] 웹캠 전용 주기 세션별 버퍼 (메모리상 관리)
-        self.webcam_buffers: Dict[str, Any] = {} # session_id -> {"start_time": float, "data": dict}
+        self.session_repo = session_repo
+        self.ocr_service = ocr_service
+        self.ocr_engine = ocr_engine
+        self.segment_result_service = segment_result_service
+        self.realtime_event_service = realtime_event_service
+        self.webcam_state: Dict[str, Any] = {}
 
     def execute(self, command: AnalyzeFrameCommand) -> Dict[int, Person]:
-        """
-        1. 이미지 정규화(Base64 -> Frame)
-        2. AI 추론 실행
-        3. 실시간 추적 상태(Entity 리스트) 반환
-        """
-        # [Normalization]: 계층화 아키텍처 가이드에 따라 서비스 레이어에서 가공
         normalized_frame = self.analyze_worker.prepare_frame(command.image_base64)
-        
         if normalized_frame is None:
             return {}
 
-        # [Logic]: 분석 서비스를 통해 도메인 엔티티(Person) 상태 갱신
+        print(
+            f"[Webcam] frame received - session_id={command.session_id}",
+            flush=True,
+        )
         results = self.analyze_worker.run_inference(normalized_frame)
 
-        # [Log] 웹캠 프레임별 신뢰도 출력
         for p_id, person in results.items():
-            print(f"      - [WebcamFrameLog] Person {p_id}: Helmet={person.helmet_confidence:.2f}, Vest={person.vest_confidence:.2f}")
-        
-        # [Step 2] 웹캠 세션 DB 저장 및 주기 정산
-        if command.session_id and self.process_result_usecase:
-            self._handle_webcam_aggregation(command.session_id, results)
-        
+            print(
+                f"      - [WebcamFrameLog] Person {p_id}: "
+                f"Helmet={person.helmet_confidence:.2f}, "
+                f"Vest={person.vest_confidence:.2f}"
+            )
+
+        if command.session_id and self.segment_result_service and self.session_repo:
+            self._handle_webcam_segment(command.session_id, normalized_frame, results)
+        elif not command.session_id:
+            print("[Webcam] frame skipped - session_id missing", flush=True)
+
         return results
 
-    def _handle_webcam_aggregation(self, session_id: str, results: Dict[int, Person]):
+    def finalize_session(self, session_id: str, reason: str = "finalize") -> None:
+        if not self.session_repo or not self.segment_result_service:
+            return
+
+        session = self.session_repo.find_by_session_id(session_id)
+        if session is None:
+            return
+
+        if self.realtime_event_service:
+            self.realtime_event_service.emit_session_status(
+                session_id=session_id,
+                source_type="WEBCAM",
+                status="stopping",
+            )
+
+        print(
+            f"[Webcam] {reason} flush triggered - session_id={session_id}",
+            flush=True,
+        )
+        self.segment_result_service.finalize_session(session, reason=reason)
+        self.webcam_state.pop(session_id, None)
+
+    def _handle_webcam_segment(
+        self,
+        session_id: str,
+        frame,
+        results: Dict[int, Person],
+    ) -> None:
         now = time.time()
-        if session_id not in self.webcam_buffers:
-            self.webcam_buffers[session_id] = {
-                "start_time": now,
-                "data": collections.defaultdict(list)
-            }
-        
-        buffer = self.webcam_buffers[session_id]
-        
-        # 데이터 누적
-        for p_id, person in results.items():
-            # [Step 2 지원] 버퍼에 누적 (터미널 출력은 위 execute에서 수행)
-            buffer["data"][p_id].append({
-                "helmet_conf": person.helmet_confidence,
-                "vest_conf": person.vest_confidence,
-                "bbox": person.bbox,
-                "has_helmet": person.has_helmet,
-                "has_vest": person.has_vest
-            })
-            
-        # 60초 경과 시 정산
-        if now - buffer["start_time"] >= 10.0:
-            print(f"[Webcam] 60초 주기 정산 시작 (Session: {session_id})")
-            for p_id, frames in buffer["data"].items():
-                if not frames: continue
-                
-                avg_helmet = sum(f['helmet_conf'] for f in frames) / len(frames)
-                avg_vest = sum(f['vest_conf'] for f in frames) / len(frames)
-                
-                # [Log] 웹캠 정산 구간 평균 신뢰도 출력
-                print(f"  ==> [WebcamAggregationLog] Person {p_id} (Data Count: {len(frames)}): "
-                      f"Avg Helmet={avg_helmet:.4f}, Avg Vest={avg_vest:.4f}")
-                
-                # 대표값으로 마지막 프레임 데이터 사용 (간략화)
-                last = frames[-1]
-                cmd = ProcessDetectionCommand(
-                    session_id=session_id,
-                    frame_id=1, # 웹캠은 스트리밍이므로 임의의 프레임 ID 부여
-                    person_index=p_id,
-                    helmet_status=ItemWearStatus.WEARING if avg_helmet >= 0.7 else ItemWearStatus.NOT_WEARING,
-                    vest_status=ItemWearStatus.WEARING if avg_vest >= 0.7 else ItemWearStatus.NOT_WEARING,
-                    person_box_x=last['bbox'][0],
-                    person_box_y=last['bbox'][1],
-                    person_box_width=last['bbox'][2] - last['bbox'][0],
-                    person_box_height=last['bbox'][3] - last['bbox'][1]
+        state = self.webcam_state.setdefault(
+            session_id,
+            {
+                "started_at": now,
+                "frame_no": 0,
+            },
+        )
+        state["frame_no"] += 1
+
+        session = self.session_repo.find_by_session_id(session_id)
+        if session is None:
+            print(
+                f"[Webcam] session lookup failed - session_id={session_id}",
+                flush=True,
+            )
+            return
+
+        elapsed_sec = now - state["started_at"]
+        people = list(results.values())
+
+        for person in people:
+            person.latest_ocr_candidate = None
+            person.latest_ocr_regex_matched = False
+            person.latest_ocr_raw_text = None
+
+            if self.ocr_service is None or self.ocr_engine is None:
+                continue
+
+            if self.ocr_service.should_run_ocr_for_person(person, elapsed_sec):
+                ocr_data = self.ocr_engine.extract_worker_id(person.crop_image)
+                person.last_ocr_at_sec = elapsed_sec
+                self.ocr_service.apply_ocr_result_to_person(person, ocr_data)
+
+        self.segment_result_service.ingest_frame(
+            session=session,
+            frame_no=state["frame_no"],
+            frame_time_sec=elapsed_sec,
+            frame=frame,
+            people=people,
+        )
+        if self.realtime_event_service:
+            detections = []
+            for person in people:
+                detections.append(
+                    {
+                        "track_id": person.id,
+                        "employee_id": getattr(person, "employee_no", None),
+                        "ocr_number": getattr(person, "employee_no", None),
+                        "helmet_status": "WORN" if person.has_helmet else "NOT_WORN",
+                        "vest_status": "WORN" if person.has_vest else "NOT_WORN",
+                        "bbox": {
+                            "x1": int(person.bbox[0]),
+                            "y1": int(person.bbox[1]),
+                            "x2": int(person.bbox[2]),
+                            "y2": int(person.bbox[3]),
+                        },
+                    }
                 )
-                self.process_result_usecase.execute(cmd)
-            
-            # 버퍼 초기화
-            self.webcam_buffers[session_id] = {
-                "start_time": now,
-                "data": collections.defaultdict(list)
+            current_counts = {
+                "detected_person_count": len(detections),
+                "confirmed_ocr_person_count": sum(
+                    1 for item in detections if item.get("ocr_number")
+                ),
+                "helmet_not_worn_count": sum(
+                    1 for item in detections if item.get("helmet_status") != "WORN"
+                ),
+                "vest_not_worn_count": sum(
+                    1 for item in detections if item.get("vest_status") != "WORN"
+                ),
             }
+            self.realtime_event_service.emit_progress(
+                session_id=session_id,
+                source_type="WEBCAM",
+                current_time_sec=elapsed_sec,
+                total_time_sec=0.0,
+                processed_frames=state["frame_no"],
+                current_counts=current_counts,
+            )
+            self.realtime_event_service.emit_frame_result(
+                session_id=session_id,
+                source_type="WEBCAM",
+                frame=frame,
+                detections=detections,
+            )
+        print(
+            f"[Webcam] segment window updated - session_id={session_id}, "
+            f"frame_no={state['frame_no']}, elapsed_sec={elapsed_sec:.2f}, "
+            f"person_count={len(people)}",
+            flush=True,
+        )

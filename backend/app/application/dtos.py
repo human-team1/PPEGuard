@@ -106,3 +106,41 @@ class AnalyzeFrameCommand:
     image_base64: str
     session_id: Optional[str] = None
 
+
+@dataclass
+class AnalysisSegmentPersonResultResponseDto:
+    person_result_id: int
+    track_id: int
+    employee_id: Optional[str]
+    ocr_number: Optional[str]
+    ocr_confirmed: bool
+    helmet_status: str
+    vest_status: str
+    observed_frames: int
+    helmet_detected_frames: int
+    vest_detected_frames: int
+    regex_match_count: int
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass
+class AnalysisSegmentSummaryResponseDto:
+    segment_id: int
+    segment_index: int
+    segment_start_sec: float
+    segment_end_sec: float
+    representative_frame_path: Optional[str]
+    person_count: int
+    confirmed_person_count: int
+    reference_time: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+    people: list[AnalysisSegmentPersonResultResponseDto]
+
+
+@dataclass
+class AnalysisSegmentListResponseDto:
+    session_id: str
+    segments: list[AnalysisSegmentSummaryResponseDto]
+

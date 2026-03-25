@@ -4,7 +4,7 @@ import re
 class VideoAnalysisOcrService:
     def __init__(
         self,
-        ocr_interval_sec: int,
+        ocr_interval_sec: float,
         employee_no_regex: str,
         employee_no_min_length: int,
         employee_no_max_length: int,
@@ -34,6 +34,10 @@ class VideoAnalysisOcrService:
         return (current_time_sec - last_ocr_at_sec) >= self.ocr_interval_sec
 
     def apply_ocr_result_to_person(self, person, ocr_data: dict | None) -> None:
+        person.latest_ocr_candidate = None
+        person.latest_ocr_regex_matched = False
+        person.latest_ocr_raw_text = None
+
         if not ocr_data:
             return
 
@@ -43,12 +47,15 @@ class VideoAnalysisOcrService:
         confidence = float((ocr_data or {}).get("confidence") or 0.0)
 
         candidate = self.normalize_employee_no(cleaned_text or raw_worker_id or raw_text)
+        person.latest_ocr_raw_text = raw_text
         if not candidate:
             return
 
+        person.latest_ocr_candidate = candidate
         if not self.is_valid_employee_no(candidate):
             return
 
+        person.latest_ocr_regex_matched = True
         person.ocr_candidate_counts[candidate] = person.ocr_candidate_counts.get(candidate, 0) + 1
         person.ocr_confidence = confidence
 
