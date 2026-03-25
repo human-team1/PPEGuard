@@ -1,12 +1,13 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
-    QRadioButton, QPushButton, QLabel, QFileDialog, QMessageBox
+    QRadioButton, QPushButton, QLabel, QFileDialog, QMessageBox,
+    QDateTimeEdit, QCheckBox
 )
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QDateTime
 from app.ui.widgets.webcam_preview_widget import WebcamPreviewWidget
 
 class InputSelectionWidget(QGroupBox):
-    analysis_requested = Signal(str, str) # source_type, source_val
+    analysis_requested = Signal(str, str, object) # source_type, source_val, video_started_at
 
     def __init__(self, parent=None):
         super().__init__("모드 선택", parent)
@@ -44,6 +45,19 @@ class InputSelectionWidget(QGroupBox):
         file_layout.addWidget(self.file_path_label, stretch=1)
         file_layout.addWidget(self.file_select_btn)
         layout.addWidget(self.file_picker_widget)
+
+        # 2a. 영상 시작 시간 직접 입력 (선택)
+        self.time_checkbox = QCheckBox("영상 시작 시간 직접 입력")
+        self.time_checkbox.stateChanged.connect(self._on_time_checkbox_changed)
+        self.time_checkbox.setChecked(False)
+        layout.addWidget(self.time_checkbox)
+
+        self.time_edit = QDateTimeEdit(QDateTime.currentDateTime())
+        self.time_edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
+        self.time_edit.setCalendarPopup(True)
+        self.time_edit.setEnabled(False)
+        self.time_edit.setToolTip("동영상 시작 시각을 설정합니다. 미입력 시 서버 현재 시간이 사용됩니다.")
+        layout.addWidget(self.time_edit)
         
         # 2b. 웹캠 미리보기 영역 (최대 높이 제한)
         self.webcam_preview = WebcamPreviewWidget()
@@ -72,11 +86,14 @@ class InputSelectionWidget(QGroupBox):
             self.webcam_preview.stop_camera()
             self.webcam_preview.hide()
             self.file_picker_widget.show()
+            self.time_checkbox.setEnabled(True)
             self._update_start_button_state()
         else:
             self.file_picker_widget.hide()
             self.webcam_preview.show()
             self.webcam_preview.start_camera(camera_id=0)
+            self.time_checkbox.setEnabled(False)
+            self.time_edit.setEnabled(False)
             self._update_start_button_state()
             
     def _select_file(self):
@@ -104,6 +121,9 @@ class InputSelectionWidget(QGroupBox):
     def set_server_connected(self, is_connected: bool):
         self.is_server_connected = is_connected
         
+    def _on_time_checkbox_changed(self, state):
+        self.time_edit.setEnabled(state == Qt.Checked)
+
     def _on_start_clicked(self):
         if hasattr(self, 'is_server_connected') and not self.is_server_connected:
             QMessageBox.warning(self, "경고", "분석을 요청하기 전에 먼저 서버에 성공적으로 연결해주세요.")
@@ -111,6 +131,9 @@ class InputSelectionWidget(QGroupBox):
 
         # 라디오 버튼 분기에 따라 외부로 시작 시그널 전송
         if self.radio_file.isChecked():
-            self.analysis_requested.emit("VIDEO_FILE", self.selected_file_path)
+            video_started_at = None
+            if self.time_checkbox.isChecked():
+                video_started_at = self.time_edit.dateTime().toString("yyyy-MM-ddTHH:mm:ss")
+            self.analysis_requested.emit("VIDEO_FILE", self.selected_file_path, video_started_at)
         else:
-            self.analysis_requested.emit("WEBCAM", "0")
+            self.analysis_requested.emit("WEBCAM", "0", None)
