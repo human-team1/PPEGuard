@@ -15,6 +15,23 @@ class AnalyzeWorker:
         self.detector = detector
         self.active_persons: Dict[int, Person] = {}
 
+    def prepare_frame(self, image_base64: str) -> Any:
+        """
+        입력된 Base64 데이터를 모델 분석이 가능한 OpenCV 프레임으로 정규화합니다.
+        (UserService의 .strip() 가공 로직과 유사한 역할)
+        """
+        if ',' in image_base64:
+            image_base64 = image_base64.split(',')[1]
+
+        import base64
+        import cv2
+        import numpy as np
+        
+        img_bytes = base64.b64decode(image_base64)
+        nparr = np.frombuffer(img_bytes, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        return frame
+
     def run_inference(self, frame: Any) -> Dict[int, Person]:
         raw_persons, raw_vests, raw_helmets = self.detector.track(frame)
         return self._build_persons(frame, raw_persons, raw_vests, raw_helmets, keep_active=True)

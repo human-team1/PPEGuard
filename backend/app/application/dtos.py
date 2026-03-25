@@ -69,3 +69,9 @@ class AnalysisFrameItemResponseDto:
 class AnalysisFrameListResponseDto:
     session_id: str
     frames: list[AnalysisFrameItemResponseDto]
+    frames: list[AnalysisFrameItemResponseDto]
+      
+      
+@dataclass
+class AnalyzeFrameCommand:
+    image_base64: str
