@@ -21,6 +21,12 @@ class Config:
     CUSTOMER_DB_USER = os.getenv("CUSTOMER_DB_USER", "")
     CUSTOMER_DB_PASSWORD = os.getenv("CUSTOMER_DB_PASSWORD", "")
 
+    # OCR 설정
+    EMPLOYEE_NO_REGEX = os.getenv("EMPLOYEE_NO_REGEX", "")
+    EMPLOYEE_NO_MIN_LENGTH = int(os.getenv("EMPLOYEE_NO_MIN_LENGTH", "0"))
+    EMPLOYEE_NO_MAX_LENGTH = int(os.getenv("EMPLOYEE_NO_MAX_LENGTH", "0"))
+    OCR_INTERVAL_SEC = int(os.getenv("OCR_INTERVAL_SEC", "5"))
+
     @classmethod
     def get_customer_db_uri(cls):
         if not cls.CUSTOMER_DB_HOST or not cls.CUSTOMER_DB_NAME or not cls.CUSTOMER_DB_USER:
@@ -31,7 +37,7 @@ class Config:
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads"))
     AI_DETECTOR_PROVIDER = os.getenv("AI_DETECTOR_PROVIDER", "mock")
     AI_OCR_PROVIDER = os.getenv("AI_OCR_PROVIDER", "mock")
-    FRAME_INTERVAL_SEC = int(os.getenv("FRAME_INTERVAL_SEC", "3"))
+    FRAME_INTERVAL_SEC = int(os.getenv("FRAME_INTERVAL_SEC", "1"))
 
     YOLO_MODEL_PATH = os.getenv(
         "YOLO_MODEL_PATH",
