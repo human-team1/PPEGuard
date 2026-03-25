@@ -11,10 +11,18 @@ class StartAnalysisSessionUseCase:
 
     def execute(self, cmd: StartSessionCommand) -> AnalysisSession:
         now = datetime.now()
+        status = AnalysisSessionStatus.QUEUED
+        started_at = None
+        
+        # 실시간 웹캠은 별도의 비디오 분석 워커가 필요 없으므로 즉시 시작 상태로 설정
+        if cmd.source_type == "WEBCAM":
+            status = AnalysisSessionStatus.STARTED
+            started_at = now
+
         session = AnalysisSession(
             session_id=str(uuid.uuid4()),
             source_type=cmd.source_type,
-            status=AnalysisSessionStatus.QUEUED, # 요구사항에 맞춰 모든 세션은 생성 시 명시적으로 대기 상태
+            status=status, 
             frame_interval_sec=cmd.frame_interval_sec,
             processed_frames=0,
             detected_count=0,
@@ -25,7 +33,6 @@ class StartAnalysisSessionUseCase:
             requested_by=cmd.requested_by,
             started_at=None, # 큐에서 넘어갈 때 갱신되도록 처리
             video_started_at=cmd.video_started_at or now # 사용자 입력, 미입력 시 서버 현재 시각
-           
         )
         self.session_repo.save(session)
         return session

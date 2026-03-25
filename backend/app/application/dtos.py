@@ -2,9 +2,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
-from ..domain.entities.analysis_session import AnalysisSourceType, AnalysisSessionStatus 
+from ..domain.entities.analysis_session import AnalysisSourceType, AnalysisSessionStatus
 from ..domain.entities.analysis_frame import FrameProcessingStatus
 from ..domain.entities.detection_result import ItemWearStatus
+
 
 @dataclass
 class StartSessionCommand:
@@ -15,27 +16,24 @@ class StartSessionCommand:
     requested_by: Optional[str] = None
     video_started_at: Optional[datetime] = None
 
+
 @dataclass
 class ProcessDetectionCommand:
-    session_id: str # analysis_session.session_id (세션 카운트 갱신용)
-    frame_id: int   # analysis_frame.id
+    session_id: str
+    frame_id: int
     person_index: int
     helmet_status: ItemWearStatus
     vest_status: ItemWearStatus
     employee_no: Optional[str] = None
     ocr_text: Optional[str] = None
-    ocr_confidence: Optional[Decimal] = None
+    ocr_confidence: Optional[float] = None
     person_box_x: Optional[int] = None
     person_box_y: Optional[int] = None
     person_box_width: Optional[int] = None
     person_box_height: Optional[int] = None
     crop_image_path: Optional[str] = None
 
-@dataclass
-class AnalyzeFrameCommand:
-    image_base64: str
-    
-# 응답 DTO 추가  
+
 @dataclass
 class AnalysisSessionResponseDto:
     session_id: str
@@ -53,6 +51,7 @@ class AnalysisSessionResponseDto:
     created_at: datetime
     updated_at: datetime
 
+
 @dataclass
 class AnalysisFrameItemResponseDto:
     frame_id: int
@@ -65,6 +64,7 @@ class AnalysisFrameItemResponseDto:
     error_message: Optional[str]
     created_at: datetime
     updated_at: datetime
+
 
 @dataclass
 class AnalysisFrameListResponseDto:
@@ -97,3 +97,12 @@ class DetectionResultItemResponseDto:
 class DetectionResultListResponseDto:
     session_id: str
     results: list[DetectionResultItemResponseDto]
+    frames: list[AnalysisFrameItemResponseDto]
+    frames: list[AnalysisFrameItemResponseDto]
+      
+      
+@dataclass
+class AnalyzeFrameCommand:
+    image_base64: str
+    session_id: Optional[str] = None
+

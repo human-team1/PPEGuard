@@ -19,6 +19,7 @@ class SocketService(QObject):
         self.server_url = server_url
         self.sio = socketio.Client()
         self.is_busy = False 
+        self.session_id = None # 분석 세션 ID 연동용
         self._setup_handlers()
 
     def _setup_handlers(self):
@@ -76,7 +77,11 @@ class SocketService(QObject):
             _, buffer = cv2.imencode('.jpg', frame_np, [cv2.IMWRITE_JPEG_QUALITY, 60])
             b64_frame = base64.b64encode(buffer).decode('utf-8')
             
-            self.sio.emit('frame', {'image': f"data:image/jpeg;base64,{b64_frame}"})
+            # [Step 2 지원] session_id와 함께 프레임 전송
+            self.sio.emit('frame', {
+                'image': f"data:image/jpeg;base64,{b64_frame}",
+                'session_id': self.session_id
+            })
         except Exception as e:
             self.is_busy = False
             print(f"Frame encoding error: {e}")

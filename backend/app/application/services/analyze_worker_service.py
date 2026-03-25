@@ -1,4 +1,5 @@
 from typing import Dict, Any
+from datetime import datetime
 from app.domain.ports.detector_port import IDetector
 from app.domain.entities.person import Person
 from app.domain.rules import map_gear_to_person, evaluate_ppe_status
@@ -7,8 +8,7 @@ from app.domain.rules import map_gear_to_person, evaluate_ppe_status
 class AnalyzeWorker:
     """
     비즈니스 유스케이스 흐름 오케스트레이터
-    - run_inference(): 웹캠용 track
-    - run_inference_for_video(): 동영상용 detect
+    - 웹캠 / 영상 모두 track 기반
     """
 
     def __init__(self, detector: IDetector):
@@ -37,7 +37,7 @@ class AnalyzeWorker:
         return self._build_persons(frame, raw_persons, raw_vests, raw_helmets, keep_active=True)
 
     def run_inference_for_video(self, frame: Any) -> Dict[int, Person]:
-        raw_persons, raw_vests, raw_helmets = self.detector.detect(frame) 
+        raw_persons, raw_vests, raw_helmets = self.detector.track(frame)
         return self._build_persons(frame, raw_persons, raw_vests, raw_helmets, keep_active=False)
 
     def _build_persons(
@@ -49,11 +49,9 @@ class AnalyzeWorker:
         keep_active: bool,
     ) -> Dict[int, Person]:
         current_persons: Dict[int, Person] = {}
-        current_frame_ids = []
 
         for p_data in raw_persons:
             p_id = p_data["id"]
-            current_frame_ids.append(p_id)
 
             if keep_active and p_id in self.active_persons:
                 person = self.active_persons[p_id]
@@ -72,14 +70,12 @@ class AnalyzeWorker:
             h, w = frame.shape[:2]
             x1, y1, x2, y2 = person.bbox
             person.crop_image = frame[max(0, y1):min(h, y2), max(0, x1):min(w, x2)].copy()
+            person.last_updated = datetime.now()
 
             current_persons[p_id] = person
 
         if keep_active:
-            self.active_persons = {
-                pid: p for pid, p in current_persons.items()
-                if pid in current_frame_ids
-            }
+            self.active_persons = current_persons
             return self.active_persons
 
         return current_persons
