@@ -30,6 +30,28 @@ class VideoAnalysisFileService:
         cv2.imwrite(saved_path, crop_image)
         return saved_path
 
+    def save_segment_frame(self, session_id: str, segment_index: int, frame_no: int, frame_image):
+        if frame_image is None:
+            return None
+
+        if getattr(frame_image, "size", 0) == 0:
+            return None
+
+        filename = f"{session_id}_segment{segment_index}_f{frame_no}.jpg"
+        saved_path = os.path.join(self.crop_dir, filename)
+        cv2.imwrite(saved_path, frame_image)
+        return saved_path
+
+    def delete_file(self, path: str | None) -> None:
+        if not path:
+            return
+
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except Exception as exc:
+                print(f"[VideoAnalysis] 파일 삭제 실패 - path={path}, error={exc}")
+
     def cleanup_previous_minute_frames(self, minute_frame_store: dict, target_minute_bucket: int) -> None:
         candidates = minute_frame_store.get(target_minute_bucket, [])
         if not candidates:

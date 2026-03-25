@@ -2,6 +2,7 @@ import abc
 from ..entities.analysis_session import AnalysisSession
 from ..entities.analysis_frame import AnalysisFrame
 from ..entities.detection_result import DetectionResult
+from ..entities.analysis_segment import AnalysisSegmentSummary, AnalysisSegmentPersonResult
 
 class AnalysisSessionRepository(abc.ABC):
     @abc.abstractmethod
@@ -48,6 +49,26 @@ class DetectionResultRepository(abc.ABC):
 
     @abc.abstractmethod
     def find_recent(self, limit: int):
+        pass
+
+
+class AnalysisSegmentSummaryRepository(abc.ABC):
+    @abc.abstractmethod
+    def save(self, summary: AnalysisSegmentSummary):
+        pass
+
+    @abc.abstractmethod
+    def find_by_session_id(self, session_id: int):
+        pass
+
+
+class AnalysisSegmentPersonResultRepository(abc.ABC):
+    @abc.abstractmethod
+    def save_many(self, results: list[AnalysisSegmentPersonResult]):
+        pass
+
+    @abc.abstractmethod
+    def find_by_segment_summary_ids(self, segment_summary_ids: list[int]):
         pass
 
 

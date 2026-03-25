@@ -1,9 +1,14 @@
 import uuid
 from datetime import datetime
-from typing import Optional
-from ...domain.entities.analysis_session import AnalysisSession, AnalysisSessionStatus
+
+from ...domain.entities.analysis_session import (
+    AnalysisSession,
+    AnalysisSessionStatus,
+    AnalysisSourceType,
+)
 from ...domain.ports.repository import AnalysisSessionRepository
 from ..dtos import StartSessionCommand
+
 
 class StartAnalysisSessionUseCase:
     def __init__(self, session_repo: AnalysisSessionRepository):
@@ -13,16 +18,15 @@ class StartAnalysisSessionUseCase:
         now = datetime.now()
         status = AnalysisSessionStatus.QUEUED
         started_at = None
-        
-        # 실시간 웹캠은 별도의 비디오 분석 워커가 필요 없으므로 즉시 시작 상태로 설정
-        if cmd.source_type == "WEBCAM":
-            status = AnalysisSessionStatus.STARTED
+
+        if cmd.source_type == AnalysisSourceType.WEBCAM:
+            status = AnalysisSessionStatus.PROCESSING
             started_at = now
 
         session = AnalysisSession(
             session_id=str(uuid.uuid4()),
             source_type=cmd.source_type,
-            status=status, 
+            status=status,
             frame_interval_sec=cmd.frame_interval_sec,
             processed_frames=0,
             detected_count=0,
@@ -31,8 +35,8 @@ class StartAnalysisSessionUseCase:
             source_name=cmd.source_name,
             total_frames=cmd.total_frames,
             requested_by=cmd.requested_by,
-            started_at=None, # 큐에서 넘어갈 때 갱신되도록 처리
-            video_started_at=cmd.video_started_at or now # 사용자 입력, 미입력 시 서버 현재 시각
+            started_at=started_at,
+            video_started_at=cmd.video_started_at or now,
         )
         self.session_repo.save(session)
         return session

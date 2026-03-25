@@ -25,7 +25,7 @@ class Config:
     EMPLOYEE_NO_REGEX = os.getenv("EMPLOYEE_NO_REGEX", "")
     EMPLOYEE_NO_MIN_LENGTH = int(os.getenv("EMPLOYEE_NO_MIN_LENGTH", "0"))
     EMPLOYEE_NO_MAX_LENGTH = int(os.getenv("EMPLOYEE_NO_MAX_LENGTH", "0"))
-    OCR_INTERVAL_SEC = int(os.getenv("OCR_INTERVAL_SEC", "5"))
+    OCR_INTERVAL_SEC = float(os.getenv("OCR_INTERVAL_SEC", "1"))
 
     @classmethod
     def get_customer_db_uri(cls):
@@ -35,9 +35,7 @@ class Config:
         return f"{cls.CUSTOMER_DB_DRIVER}://{cls.CUSTOMER_DB_USER}:{cls.CUSTOMER_DB_PASSWORD}@{cls.CUSTOMER_DB_HOST}:{cls.CUSTOMER_DB_PORT}/{cls.CUSTOMER_DB_NAME}"
 
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads"))
-    AI_DETECTOR_PROVIDER = os.getenv("AI_DETECTOR_PROVIDER", "mock")
-    AI_OCR_PROVIDER = os.getenv("AI_OCR_PROVIDER", "mock")
-    FRAME_INTERVAL_SEC = int(os.getenv("FRAME_INTERVAL_SEC", "1"))
+    FRAME_INTERVAL_SEC = float(os.getenv("FRAME_INTERVAL_SEC", "1"))
 
     YOLO_MODEL_PATH = os.getenv(
         "YOLO_MODEL_PATH",
