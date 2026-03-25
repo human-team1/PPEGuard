@@ -24,7 +24,7 @@ class AnalysisSession:
     detected_count: int = 0              # 탐지된 총 건수
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
-    
+    video_started_at: Optional[datetime] = None
     id: Optional[int] = None             # DB PK
     source_name: Optional[str] = None    # 파일명 등
     total_frames: Optional[int] = None   # 전체 프레임 수

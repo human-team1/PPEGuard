@@ -17,5 +17,6 @@ class AnalysisSessionModel(Base):
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
     fail_reason = Column(String(500), nullable=True)
+    video_started_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, nullable=False)

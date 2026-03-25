@@ -20,6 +20,7 @@ class SQLAlchemyAnalysisSessionRepository(AnalysisSessionRepository):
             started_at=model.started_at,
             finished_at=model.finished_at,
             fail_reason=model.fail_reason,
+            video_started_at=model.video_started_at,
             created_at=model.created_at,
             updated_at=model.updated_at
         )
@@ -39,6 +40,7 @@ class SQLAlchemyAnalysisSessionRepository(AnalysisSessionRepository):
             started_at=domain.started_at,
             finished_at=domain.finished_at,
             fail_reason=domain.fail_reason,
+            video_started_at=domain.video_started_at,
             created_at=domain.created_at,
             updated_at=domain.updated_at
         )
@@ -67,6 +69,7 @@ class SQLAlchemyAnalysisSessionRepository(AnalysisSessionRepository):
                 model.finished_at = session.finished_at
                 model.fail_reason = session.fail_reason
                 model.updated_at = session.updated_at
+                model.video_started_at = session.video_started_at
                 db_session.commit()
 
     def find_by_session_id(self, session_id: str):

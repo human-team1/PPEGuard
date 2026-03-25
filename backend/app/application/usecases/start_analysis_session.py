@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Optional
 from ...domain.entities.analysis_session import AnalysisSession, AnalysisSessionStatus
 from ...domain.ports.repository import AnalysisSessionRepository
 from ..dtos import StartSessionCommand
@@ -22,7 +23,9 @@ class StartAnalysisSessionUseCase:
             source_name=cmd.source_name,
             total_frames=cmd.total_frames,
             requested_by=cmd.requested_by,
-            started_at=None # 큐에서 넘어갈 때 갱신되도록 처리
+            started_at=None, # 큐에서 넘어갈 때 갱신되도록 처리
+            video_started_at=cmd.video_started_at or now # 사용자 입력, 미입력 시 서버 현재 시각
+           
         )
         self.session_repo.save(session)
         return session

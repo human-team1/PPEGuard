@@ -34,5 +34,9 @@ class DetectionResult:
     
     crop_image_path: Optional[str] = None    # 잘라낸 이미지 경로
     
+    frame_no: Optional[int] = None
+    frame_time_sec: Optional[Decimal] = None
+    detected_at: Optional[datetime] = None  # 실제 탐지 시각 (video_started_at + frame_time_sec)
+
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)

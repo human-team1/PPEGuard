@@ -1,8 +1,10 @@
 from decimal import Decimal
+from datetime import timedelta
 from app.domain.entities.detection_result import DetectionResult, OverallPPEStatus, ItemWearStatus
 from app.domain.ports.service_detection_result_repository import ServiceDetectionResultRepository
 from app.infrastructure.service_db.models.detection_result import DetectionResultModel
 from app.infrastructure.service_db.models.analysis_frame import AnalysisFrameModel
+from app.infrastructure.service_db.models.analysis_session import AnalysisSessionModel
 from app.infrastructure.service_db.session import SessionLocal
 
 # DetectionResult 엔티티와 ORM 모델을 연결하는 매핑 + 저장 repository
@@ -62,28 +64,74 @@ class SQLAlchemyDetectionResultRepository(ServiceDetectionResultRepository):
         
     def find_by_session_id(self, session_id):
         with SessionLocal() as db_session:
-            models = (
-                db_session.query(DetectionResultModel)
+            rows = (
+                db_session.query(DetectionResultModel, AnalysisFrameModel, AnalysisSessionModel)
                 .join(AnalysisFrameModel, DetectionResultModel.frame_id == AnalysisFrameModel.id)
+                .join(AnalysisSessionModel, AnalysisFrameModel.session_id == AnalysisSessionModel.id)
                 .filter(AnalysisFrameModel.session_id == session_id)
                 .all()
             )
-            return [self._to_domain(m) for m in models]
+
+            results = []
+            for result_model, frame_model, session_model in rows:
+                result = self._to_domain(result_model)
+                result.frame_no = frame_model.frame_no
+                result.frame_time_sec = (
+                    Decimal(str(frame_model.frame_time_sec))
+                    if frame_model.frame_time_sec is not None else None
+                )
+                if session_model.video_started_at and result.frame_time_sec is not None:
+                    result.detected_at = session_model.video_started_at + timedelta(seconds=float(result.frame_time_sec))
+                results.append(result)
+
+            return results
 
     def find_recent(self, limit):
         with SessionLocal() as db_session:
-            models = (
-                db_session.query(DetectionResultModel)
+            rows = (
+                db_session.query(DetectionResultModel, AnalysisFrameModel, AnalysisSessionModel)
+                .join(AnalysisFrameModel, DetectionResultModel.frame_id == AnalysisFrameModel.id)
+                .join(AnalysisSessionModel, AnalysisFrameModel.session_id == AnalysisSessionModel.id)
                 .order_by(DetectionResultModel.created_at.desc())
                 .limit(limit)
                 .all()
             )
-            return [self._to_domain(m) for m in models]
+
+            results = []
+            for result_model, frame_model, session_model in rows:
+                result = self._to_domain(result_model)
+                result.frame_no = frame_model.frame_no
+                result.frame_time_sec = (
+                    Decimal(str(frame_model.frame_time_sec))
+                    if frame_model.frame_time_sec is not None else None
+                )
+                if session_model.video_started_at and result.frame_time_sec is not None:
+                    result.detected_at = session_model.video_started_at + timedelta(seconds=float(result.frame_time_sec))
+                results.append(result)
+
+            return results
 
     def find_by_id(self, id):
         with SessionLocal() as db_session:
-            model = db_session.query(DetectionResultModel).filter_by(id=id).first()
-            if model:
-                return self._to_domain(model)
-            return None 
+            row = (
+                db_session.query(DetectionResultModel, AnalysisFrameModel, AnalysisSessionModel)
+                .join(AnalysisFrameModel, DetectionResultModel.frame_id == AnalysisFrameModel.id)
+                .join(AnalysisSessionModel, AnalysisFrameModel.session_id == AnalysisSessionModel.id)
+                .filter(DetectionResultModel.id == id)
+                .first()
+            )
+
+            if not row:
+                return None
+
+            result_model, frame_model, session_model = row
+            result = self._to_domain(result_model)
+            result.frame_no = frame_model.frame_no
+            result.frame_time_sec = (
+                Decimal(str(frame_model.frame_time_sec))
+                if frame_model.frame_time_sec is not None else None
+            )
+            if session_model.video_started_at and result.frame_time_sec is not None:
+                result.detected_at = session_model.video_started_at + timedelta(seconds=float(result.frame_time_sec))
+            return result
         
