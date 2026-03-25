@@ -3,11 +3,12 @@ SQLAlchemy==2.0.21
 Flask-SQLAlchemy==3.1.1
 PyMySQL==1.1.0
 python-dotenv==1.0.0
-opencv-python-headless==4.8.1.78
+opencv-python==4.13.0.92
 marshmallow==3.20.1
-ultralytics>=8.3.0
-numpy>=1.24.0
+ultralytics==8.4.25
+numpy==2.2.6
 easyocr==1.7.2
+torch==2.10.0
 pytest==9.0.2
 flask-socketio==5.3.6
 eventlet==0.36.1 
