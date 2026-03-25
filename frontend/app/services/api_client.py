@@ -62,7 +62,7 @@ class ApiClient:
         except requests.exceptions.RequestException as e:
             self._handle_request_error(e, "분석 세션 생성을 요청하지 못했습니다.")
 
-    def upload_video(self, video_path: str) -> Dict[str, Any]:
+    def upload_video(self, video_path: str, video_started_at: str = None) -> Dict[str, Any]:
         """동영상 업로드 요청 (POST /api/v1/video)"""
         url = f"{self.base_url}/api/v1/video"
 
@@ -74,7 +74,11 @@ class ApiClient:
                 files = {
                     "file": (os.path.basename(video_path), video_file, "video/mp4")
                 }
-                response = requests.post(url, files=files, timeout=30)
+                data = {}
+                if video_started_at:
+                    data["video_started_at"] = video_started_at
+
+                response = requests.post(url, files=files, data=data, timeout=300)
                 response.raise_for_status()
                 return response.json()
         except requests.exceptions.RequestException as e:
@@ -99,3 +103,13 @@ class ApiClient:
             return response.json()
         except requests.exceptions.RequestException as e:
             self._handle_request_error(e, "해당 결과의 상세 데이터를 가져오지 못했습니다.")
+    
+    def get_session_results(self, session_id: str) -> list:
+        """특정 세션 결과 조회 (GET /api/v1/sessions/{session_id}/results)"""
+        url = f"{self.base_url}/api/v1/sessions/{session_id}/results"
+        try:
+            response = requests.get(url, timeout=5)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            self._handle_request_error(e, "세션 결과 목록을 가져오지 못했습니다.")

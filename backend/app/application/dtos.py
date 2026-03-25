@@ -14,6 +14,7 @@ class StartSessionCommand:
     source_name: Optional[str] = None
     total_frames: Optional[int] = None
     requested_by: Optional[str] = None
+    video_started_at: Optional[datetime] = None
 
 
 @dataclass
@@ -68,6 +69,34 @@ class AnalysisFrameItemResponseDto:
 @dataclass
 class AnalysisFrameListResponseDto:
     session_id: str
+    frames: list[AnalysisFrameItemResponseDto] 
+
+
+@dataclass
+class DetectionResultItemResponseDto:
+    result_id: int
+    frame_id: int
+    frame_no: Optional[int]
+    frame_time_sec: Optional[Decimal]
+    person_index: int
+    employee_no: Optional[str]
+    ocr_text: Optional[str]
+    ocr_confidence: Optional[Decimal]
+    overall_ppe_status: str
+    helmet_status: str
+    vest_status: str
+    crop_image_path: Optional[str]
+    person_box_x: Optional[int]
+    person_box_y: Optional[int]
+    person_box_width: Optional[int]
+    person_box_height: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+
+@dataclass
+class DetectionResultListResponseDto:
+    session_id: str
+    results: list[DetectionResultItemResponseDto]
     frames: list[AnalysisFrameItemResponseDto]
     frames: list[AnalysisFrameItemResponseDto]
       
@@ -76,3 +105,4 @@ class AnalysisFrameListResponseDto:
 class AnalyzeFrameCommand:
     image_base64: str
     session_id: Optional[str] = None
+

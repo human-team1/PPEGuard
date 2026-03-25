@@ -24,12 +24,14 @@ class ResultDetailWidget(QFrame):
         layout.addWidget(self.image_label)
         
         self.info_layout = QFormLayout()
-        self.lbl_time = QLabel("-")
+        self.lbl_video_time = QLabel("-")
+        self.lbl_detected_at_absolute = QLabel("-")
         self.lbl_helmet = QLabel("-")
         self.lbl_vest = QLabel("-")
         self.lbl_ocr = QLabel("-")
         
-        self.info_layout.addRow("발견 시간:", self.lbl_time)
+        self.info_layout.addRow("영상 위치:", self.lbl_video_time)
+        self.info_layout.addRow("발견 시각:", self.lbl_detected_at_absolute)
         self.info_layout.addRow("안전모 상태:", self.lbl_helmet)
         self.info_layout.addRow("작업조끼 상태:", self.lbl_vest)
         self.info_layout.addRow("OCR 텍스트:", self.lbl_ocr)
@@ -51,15 +53,13 @@ class ResultDetailWidget(QFrame):
         self.title_label.setText(f"탐지 결과 [ID: {dto.id}]")
         self.title_label.setStyleSheet("color: black; font-weight: bold; font-size: 16px;")
         
-        self.lbl_time.setText(dto.detected_at)
+        self.lbl_video_time.setText(dto.detected_at)
+        self.lbl_detected_at_absolute.setText(dto.detected_at_absolute)
         self.lbl_helmet.setText(dto.helmet_status)
         self.lbl_vest.setText(dto.vest_status)
         self.lbl_ocr.setText(dto.ocr_text)
         
-        # 이미지 렌더링 방어 코드
         if dto.image_path:
-            # MVP 프론트 데스크탑의 경우 백엔드 볼륨 또는 로컬 경로를 참조한다고 가정.
-            # 서버 미공개로 실제 파일이 안 열릴 경우를 대비해 isNull 체킹.
             pixmap = QPixmap(dto.image_path)
             if not pixmap.isNull():
                 self.image_label.setPixmap(pixmap.scaled(
@@ -73,7 +73,8 @@ class ResultDetailWidget(QFrame):
             self.image_label.setText("이미지 없음 (데이터 누락)")
             
     def _clear_info(self):
-        self.lbl_time.setText("-")
+        self.lbl_video_time.setText("-")
+        self.lbl_detected_at_absolute.setText("-")
         self.lbl_helmet.setText("-")
         self.lbl_vest.setText("-")
         self.lbl_ocr.setText("-")

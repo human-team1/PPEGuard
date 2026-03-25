@@ -5,11 +5,12 @@ PyMySQL==1.1.0
 python-dotenv==1.0.0
 opencv-python-headless==4.8.1.78
 marshmallow==3.20.1
-SQLAlchemy>=2.0.0
 ultralytics>=8.3.0
 numpy>=1.24.0
 easyocr==1.7.2
 pytest==9.0.2
 flask-socketio==5.3.6
-gevent==23.9.1
-gevent-websocket==0.10.1
+eventlet==0.36.1 
+# gevent==23.9.1
+# gevent-websocket==0.10.1 
+# SQLAlchemy>=2.0.0 

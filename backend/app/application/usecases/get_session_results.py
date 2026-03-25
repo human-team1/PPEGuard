@@ -10,7 +10,6 @@ class GetSessionResultsUseCase:
         result_repo: ServiceDetectionResultRepository,
         frame_repo: AnalysisFrameRepository
     ):
-
         self.session_repo = session_repo
         self.frame_repo = frame_repo
         self.result_repo = result_repo
@@ -20,11 +19,19 @@ class GetSessionResultsUseCase:
         if not session or session.id is None:
             raise ValueError(f"Session not found or has no internal id: {session_id}")
 
-        frames = self.frame_repo.find_by_session_id(session.id)
-
-        results = []
-        for frame in frames:
-            frame_results = self.result_repo.find_by_frame_id(frame.id)
-            results.extend(frame_results)
-
+        results = self.result_repo.find_by_session_id(session.id)
         return results
+
+    # def execute(self, session_id: str) -> List[DetectionResult]:
+    #     session = self.session_repo.find_by_session_id(session_id)
+    #     if not session or session.id is None:
+    #         raise ValueError(f"Session not found or has no internal id: {session_id}")
+
+    #     frames = self.frame_repo.find_by_session_id(session.id)
+
+    #     results = []
+    #     for frame in frames:
+    #         frame_results = self.result_repo.find_by_frame_id(frame.id)
+    #         results.extend(frame_results)
+
+    #     return results

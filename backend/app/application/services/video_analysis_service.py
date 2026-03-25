@@ -3,14 +3,13 @@ import re
 import uuid
 import cv2
 import collections
-
+from datetime import datetime 
 from collections import defaultdict
 from config.settings import Config
 from app.application.dtos import StartSessionCommand, ProcessDetectionCommand
 from app.domain.entities.analysis_session import AnalysisSourceType
 from app.domain.entities.analysis_frame import FrameProcessingStatus
 from app.domain.entities.detection_result import ItemWearStatus
-
 
 class VideoAnalysisService:
     ALLOWED_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
@@ -48,8 +47,23 @@ class VideoAnalysisService:
         os.makedirs(self.upload_dir, exist_ok=True)
         os.makedirs(self.crop_dir, exist_ok=True)
 
-    def execute(self, video_file, requested_by: str = "desktop-client", frame_interval_sec: int | None = None):
-        print("[VideoAnalysis] execute 시작")
+    def execute(self, 
+                video_file, 
+                requested_by: str = "desktop-client", 
+                frame_interval_sec: int,
+                video_started_at: str | None = None): 
+        print("[VideoAnalysis] execute 시작") 
+
+        if video_started_at:
+            if isinstance(video_started_at, datetime):
+                video_started_at_dt = video_started_at
+            else:
+                try:
+                    video_started_at_dt = datetime.fromisoformat(video_started_at)
+                except Exception:
+                    raise ValueError("video_started_at 형식이 올바르지 않습니다. (예: 2026-03-25 14:30:00)")
+        else:
+            video_started_at_dt = datetime.now()
 
         if video_file is None: 
             print("[VideoAnalysis] 실패 - 업로드 파일 없음")
@@ -84,6 +98,7 @@ class VideoAnalysisService:
             frame_interval_sec=frame_interval_sec,
             source_name=original_filename,
             requested_by=requested_by,
+            video_started_at=video_started_at_dt,
         )
         session = self.start_analysis_session_usecase.execute(start_cmd)
         session_id = session.session_id

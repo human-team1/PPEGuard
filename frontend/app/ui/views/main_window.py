@@ -62,7 +62,7 @@ class MainWindow(QMainWindow):
 
         main_layout.addLayout(content_layout, stretch=1)
 
-    def _handle_analysis_request(self, source_type: str, source_val: str):
+    def _handle_analysis_request(self, source_type: str, source_val: str, video_started_at=None):
         self.input_widget.start_btn.setEnabled(False)
 
         if source_type == "VIDEO_FILE":
@@ -70,7 +70,8 @@ class MainWindow(QMainWindow):
 
             self.worker = ApiWorker(
                 self.api_client.upload_video,
-                video_path=source_val
+                video_path=source_val,
+                video_started_at=video_started_at
             )
             self.worker.result_ready.connect(self._on_video_uploaded)
             self.worker.error_occurred.connect(self._on_session_error)
@@ -96,16 +97,30 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def _on_video_uploaded(self, payload: dict):
+        print("upload payload =", payload)
         message = payload.get("message", "동영상 업로드 완료")
+        session_id = payload.get("session_id") 
+
         self.status_widget.show_success(message)
         self.input_widget.start_btn.setEnabled(True)
+
+        if session_id:
+            self.result_view.set_session_id(session_id)
+        
         self.result_view.load_results()
 
     def _on_session_started(self, payload: dict):
-        session_id = payload.get("session_id", "Unknown")
+        print("session payload =", payload)
+        session_id = payload.get("session_id")
         status = payload.get("status", "Unknown")
 
-        self.status_widget.show_success(f"생성 완료: [{session_id[:8]}] - 상태: {status}")
+        if session_id:
+            self.status_widget.show_success(f"생성 완료: [{session_id[:8]}] - 상태: {status}")
+            self.result_view.set_session_id(session_id)
+            self.result_view.load_results()
+        else:
+            self.status_widget.show_error("session_id를 받지 못했습니다.")
+
         self.input_widget.start_btn.setEnabled(True)
         
         # [Step 2 지원] 웹캠 소켓 서비스에 세션 ID 주입

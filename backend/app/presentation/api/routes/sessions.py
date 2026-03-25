@@ -1,3 +1,4 @@
+from datetime import datetime
 from flask import Blueprint, request, jsonify
 
 from app.infrastructure.service_db.repositories.analysis_session_repository import SQLAlchemyAnalysisSessionRepository
@@ -38,11 +39,19 @@ def create_session():
         source_type_str = data.get('source_type', 'WEBCAM')
         source_type = AnalysisSourceType[source_type_str]
 
+        video_started_at = data.get('video_started_at')
+        if video_started_at:
+            video_started_at = datetime.fromisoformat(
+                video_started_at.replace("Z", "+00:00")
+            )
+
         cmd = StartSessionCommand(
             source_type=source_type,
             frame_interval_sec=int(data.get('frame_interval_sec', 3)),
             source_name=data.get('source_name'),
-            requested_by=data.get('requested_by')
+            requested_by=data.get('requested_by'),
+            total_frames=data.get('total_frames'),
+            video_started_at=video_started_at
         )
     except Exception as e:
         return jsonify({"error": "Bad Request", "details": str(e)}), 400
@@ -87,6 +96,9 @@ def get_session_results(session_id: str):
         )
     try:
         results = usecase.execute(session_id)
+        print("DEBUG results:", results)
+        if results:
+            print("DEBUG first frame_time_sec:", results[0].frame_time_sec)
         return jsonify(serialize(results)), 200
     except ValueError:
         return jsonify({"error": "Session not found"}), 404

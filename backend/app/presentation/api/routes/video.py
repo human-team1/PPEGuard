@@ -1,3 +1,4 @@
+from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app
 
 from app.infrastructure.service_db.repositories.analysis_session_repository import SQLAlchemyAnalysisSessionRepository
@@ -16,12 +17,9 @@ from app.application.usecases.fail_analysis_session import FailAnalysisSessionUs
 from app.application.usecases.create_analysis_frame import CreateAnalysisFrameUseCase
 from app.application.usecases.process_detection_result import ProcessDetectionResultUseCase
 from app.application.services.video_analysis_service import VideoAnalysisService
-
 from app.presentation.api.schemas.serializers import serialize
 
-
 video_bp = Blueprint("video", __name__, url_prefix="/api/v1/video")
-
 
 def get_session_repo():
     return SQLAlchemyAnalysisSessionRepository()
@@ -82,6 +80,12 @@ def upload_video():
         video_file = request.files.get("file")
         requested_by = request.form.get("requested_by", "desktop-client")
         frame_interval_sec = int(request.form.get("frame_interval_sec", 3))
+
+        video_started_at = request.form.get("video_started_at")
+        if video_started_at:
+            video_started_at = datetime.fromisoformat(
+                video_started_at.replace("Z", "+00:00")
+            )
     except Exception as e:
         return jsonify({"error": "Bad Request", "details": str(e)}), 400
 
@@ -91,6 +95,7 @@ def upload_video():
             video_file=video_file,
             requested_by=requested_by,
             frame_interval_sec=frame_interval_sec,
+            video_started_at=video_started_at
         )
         return jsonify(serialize(session)), 201
 

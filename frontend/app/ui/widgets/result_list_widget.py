@@ -32,20 +32,19 @@ class ResultListWidget(QWidget):
             self.list_widget.hide()
             self.empty_label.show()
             return
-            
+        
         self.empty_label.hide()
         self.list_widget.show()
         
-        # 목록 생성 (최신순 등 백엔드 정렬 순서를 유지)
         for dto in dtos:
-            text = f"[{dto.detected_at}] ID: {dto.id} | 종합 상태: {dto.overall_status}"
-            item = QListWidgetItem(text)
-            # 내부 데이터로 result_id 은닉 저장
-            item.setData(Qt.UserRole, dto.id) 
+            item_text = f"[{dto.detected_at}] ID: {dto.id} | 종합 상태: {dto.overall_status}"
+            item = QListWidgetItem(item_text)
+            item.setData(Qt.UserRole, dto.id)
             self.list_widget.addItem(item)
-            
+
     def _on_selection_changed(self):
-        items = self.list_widget.selectedItems()
-        if items:
-            result_id = items[0].data(Qt.UserRole)
-            self.item_selected.emit(str(result_id))
+        item = self.list_widget.currentItem()
+        if item:
+            result_id = item.data(Qt.UserRole)
+            if result_id:
+                self.item_selected.emit(str(result_id))
