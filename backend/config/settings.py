@@ -50,6 +50,7 @@ class Config:
     VIDEO_PIPELINE_QUEUE_SIZE = int(os.getenv("VIDEO_PIPELINE_QUEUE_SIZE", "4"))
     YOLO_QUEUE_SIZE = int(os.getenv("YOLO_QUEUE_SIZE", "4"))
     OCR_QUEUE_SIZE = int(os.getenv("OCR_QUEUE_SIZE", "8"))
+    VIDEO_MAX_TRACK_OCR_COUNT = int(os.getenv("VIDEO_MAX_TRACK_OCR_COUNT", "6"))
     WEBCAM_CAPTURE_FPS = float(os.getenv("WEBCAM_CAPTURE_FPS", "10"))
     WEBCAM_ANALYSIS_FPS = float(os.getenv("WEBCAM_ANALYSIS_FPS", "3"))
     WEBCAM_FRAME_QUEUE_SIZE = int(os.getenv("WEBCAM_FRAME_QUEUE_SIZE", "4"))
@@ -63,8 +64,8 @@ class Config:
 
     YOLO_MODEL_PATH = os.getenv(
         "YOLO_MODEL_PATH",
-        str(BASE_DIR / "app" / "infrastructure" / "ai_analyzer" / "models" / "best.pt"),
-        # str(BASE_DIR / "app" / "infrastructure" / "ai_analyzer" / "models" / "yolo11s_ft_aug_best.pt"),
+        # str(BASE_DIR / "app" / "infrastructure" / "ai_analyzer" / "models" / "best.pt"),
+         str(BASE_DIR / "app" / "infrastructure" / "ai_analyzer" / "models" / "yolo11s_ft_aug_best.pt"),
     )
 
     YOLO_TRACKER_CONFIG = os.getenv(

@@ -7,6 +7,7 @@ from app.application.services.segment_persistence_service import SegmentPersiste
 from app.application.services.segment_result_service import SegmentResultService
 from app.application.services.video_analysis_file_service import VideoAnalysisFileService
 from app.application.services.video_analysis_service import VideoAnalysisService
+from app.application.services.webcam_result_persistence_service import WebcamResultPersistenceService
 from app.application.services.webcam_realtime_pipeline_service import WebcamPipelineManager
 from app.application.services.video_analysis_ocr_service import VideoAnalysisOcrService
 from app.application.usecases.complete_analysis_session import CompleteAnalysisSessionUseCase
@@ -14,9 +15,12 @@ from app.application.usecases.fail_analysis_session import FailAnalysisSessionUs
 from app.application.usecases.get_analysis_session import GetAnalysisSessionUseCase
 from app.application.usecases.get_detection_result import GetDetectionResultUseCase
 from app.application.usecases.get_recent_results import GetRecentResultsUseCase
+from app.application.usecases.get_recent_sessions import GetRecentSessionsUseCase
 from app.application.usecases.get_session_frames import GetSessionFramesUseCase
 from app.application.usecases.get_session_results import GetSessionResultsUseCase
 from app.application.usecases.get_session_segments import GetSessionSegmentsUseCase
+from app.application.usecases.get_session_track_detail import GetSessionTrackDetailUseCase
+from app.application.usecases.get_session_tracks import GetSessionTracksUseCase
 from app.application.usecases.process_detection_result import ProcessDetectionResultUseCase
 from app.application.usecases.start_analysis_session import StartAnalysisSessionUseCase
 from app.application.usecases.stop_analysis_session import StopAnalysisSessionUseCase
@@ -33,6 +37,9 @@ from app.infrastructure.service_db.repositories.analysis_segment_person_result_r
 )
 from app.infrastructure.service_db.repositories.analysis_segment_summary_repository import (
     SQLAlchemyAnalysisSegmentSummaryRepository,
+)
+from app.infrastructure.service_db.repositories.analysis_track_summary_repository import (
+    SQLAlchemyAnalysisTrackSummaryRepository,
 )
 from app.infrastructure.service_db.repositories.analysis_session_repository import (
     SQLAlchemyAnalysisSessionRepository,
@@ -66,12 +73,20 @@ def get_customer_result_repo():
     return SQLAlchemyCustomerDetectionResultRepository()
 
 
+def get_track_summary_repo():
+    return SQLAlchemyAnalysisTrackSummaryRepository()
+
+
 def build_start_session_usecase():
     return StartAnalysisSessionUseCase(get_session_repo())
 
 
 def build_get_session_usecase():
     return GetAnalysisSessionUseCase(get_session_repo())
+
+
+def build_get_recent_sessions_usecase():
+    return GetRecentSessionsUseCase(get_session_repo())
 
 
 def build_stop_session_usecase():
@@ -95,6 +110,20 @@ def build_get_session_segments_usecase():
         get_session_repo(),
         get_segment_summary_repo(),
         get_segment_person_result_repo(),
+    )
+
+
+def build_get_session_tracks_usecase():
+    return GetSessionTracksUseCase(
+        get_session_repo(),
+        get_track_summary_repo(),
+    )
+
+
+def build_get_session_track_detail_usecase():
+    return GetSessionTrackDetailUseCase(
+        get_session_repo(),
+        get_track_summary_repo(),
     )
 
 
@@ -157,12 +186,27 @@ def build_segment_result_service(
     )
 
 
+def build_webcam_result_persistence_service(
+    upload_dir: str | None = None,
+    crop_dir: str | None = None,
+):
+    upload_dir = upload_dir or build_upload_paths()[0]
+    crop_dir = crop_dir or build_upload_paths()[1]
+    return WebcamResultPersistenceService(
+        frame_repo=get_frame_repo(),
+        detection_result_repo=get_result_repo(),
+        track_summary_repo=get_track_summary_repo(),
+        file_service=VideoAnalysisFileService(
+            upload_dir=upload_dir,
+            crop_dir=crop_dir,
+        ),
+    )
+
+
 def build_webcam_pipeline_manager(
     model_path: str,
     tracker_config: str,
     realtime_event_service=None,
-    upload_dir: str | None = None,
-    crop_dir: str | None = None,
 ):
     realtime_service = realtime_event_service or build_realtime_event_service()
     ocr_service = VideoAnalysisOcrService(
@@ -179,12 +223,7 @@ def build_webcam_pipeline_manager(
         ocr_engine=build_ocr_engine(),
         ocr_service=ocr_service,
         session_repo=get_session_repo(),
-        segment_result_service=build_segment_result_service(
-            realtime_event_service=realtime_service,
-            upload_dir=upload_dir,
-            crop_dir=crop_dir,
-            segment_seconds=Config.WEBCAM_RESULT_WINDOW_SECONDS,
-        ),
+        result_persistence_service=build_webcam_result_persistence_service(),
         realtime_event_service=realtime_service,
         capture_fps=Config.WEBCAM_CAPTURE_FPS,
         analysis_fps=Config.WEBCAM_ANALYSIS_FPS,

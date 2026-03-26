@@ -2,6 +2,8 @@ import re
 
 
 class VideoAnalysisOcrService:
+    SUPPORTED_INSPECTION_KEYS = {"helmet", "vest"}
+
     def __init__(
         self,
         ocr_interval_sec: float,
@@ -19,7 +21,43 @@ class VideoAnalysisOcrService:
     def is_person_identified(self, person) -> bool:
         return bool(getattr(person, "ocr_confirmed", False) and getattr(person, "employee_no", None))
 
-    def should_run_ocr_for_person(self, person, current_time_sec: float) -> bool:
+    def normalize_inspection_item_keys(self, inspection_item_keys: list[str] | None) -> set[str]:
+        keys = {
+            str(item).strip().lower()
+            for item in (inspection_item_keys or [])
+            if str(item).strip()
+        }
+        active_keys = keys & self.SUPPORTED_INSPECTION_KEYS
+        return active_keys or set(self.SUPPORTED_INSPECTION_KEYS)
+
+    def get_selected_item_violation_flags(
+        self,
+        person,
+        inspection_item_keys: list[str] | None,
+    ) -> dict[str, bool]:
+        active_keys = self.normalize_inspection_item_keys(inspection_item_keys)
+        flags: dict[str, bool] = {}
+        if "helmet" in active_keys:
+            flags["helmet"] = not bool(getattr(person, "has_helmet", False))
+        if "vest" in active_keys:
+            flags["vest"] = not bool(getattr(person, "has_vest", False))
+        return flags
+
+    def has_selected_item_violation(
+        self,
+        person,
+        inspection_item_keys: list[str] | None,
+    ) -> bool:
+        return any(self.get_selected_item_violation_flags(person, inspection_item_keys).values())
+
+    def should_run_ocr_for_person(
+        self,
+        person,
+        current_time_sec: float,
+        inspection_item_keys: list[str] | None,
+        ocr_attempt_count: int = 0,
+        max_attempt_count: int | None = None,
+    ) -> bool:
         if self.is_person_identified(person):
             return False
 
@@ -27,6 +65,12 @@ class VideoAnalysisOcrService:
             return False
 
         if getattr(person.crop_image, "size", 0) == 0:
+            return False
+
+        if not self.has_selected_item_violation(person, inspection_item_keys):
+            return False
+
+        if max_attempt_count is not None and ocr_attempt_count >= max(int(max_attempt_count), 1):
             return False
 
         last_ocr_at_sec = getattr(person, "last_ocr_at_sec", None)

@@ -1,11 +1,8 @@
-import base64
 import dataclasses
 import logging
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-
-import cv2
 
 from app import socketio
 
@@ -45,6 +42,9 @@ class RealtimeEventService:
         total_time_sec: float,
         processed_frames: int,
         current_counts: dict,
+        active_person_count: int = 0,
+        violating_person_count: int = 0,
+        violation_rate: float = 0.0,
         track_summaries: list[dict] | None = None,
     ):
         progress_percent = 0.0
@@ -58,6 +58,9 @@ class RealtimeEventService:
             "total_time_sec": total_time_sec,
             "progress_percent": progress_percent,
             "processed_frames": processed_frames,
+            "active_person_count": active_person_count,
+            "violating_person_count": violating_person_count,
+            "violation_rate": violation_rate,
             "current_counts": current_counts,
             "track_summaries": track_summaries or [],
         }
@@ -78,24 +81,37 @@ class RealtimeEventService:
         self,
         session_id: str,
         source_type: str,
-        frame,
+        processed_frames: int,
+        tracks_count: int,
+        violations_count: int,
+        frame_no: int | None,
+        frame_time_sec: float | None,
+        frame_width: int,
+        frame_height: int,
         detections: list[dict],
     ):
-        preview_frame, width, height = self._encode_preview_frame(frame)
         payload = {
             "session_id": session_id,
             "source_type": source_type,
-            "preview_frame": preview_frame,
-            "frame_width": width,
-            "frame_height": height,
+            "status": "processing",
+            "processed_frames": processed_frames,
+            "tracks_count": tracks_count,
+            "violations_count": violations_count,
+            "frame_no": frame_no,
+            "frame_time_sec": frame_time_sec,
+            "frame_width": frame_width,
+            "frame_height": frame_height,
             "detections": detections,
         }
-        logger.debug(
-            "[Realtime] frame_result emitted session_id=%s source=%s has_preview=%s detections=%s",
+        logger.info(
+            "[Realtime] frame_result emitted session_id=%s frame_no=%s processed_frames=%s tracks_count=%s detections_count=%s violations_count=%s image_len=%s",
             session_id,
-            source_type,
-            bool(preview_frame),
+            frame_no,
+            processed_frames,
+            tracks_count,
             len(detections or []),
+            violations_count,
+            0,
         )
         socketio.emit(
             "analysis_frame_result",
@@ -166,30 +182,6 @@ class RealtimeEventService:
                 }
             ),
         )
-
-    def _encode_preview_frame(self, frame):
-        if frame is None or getattr(frame, "size", 0) == 0:
-            return None, 0, 0
-
-        preview = frame.copy()
-        height, width = preview.shape[:2]
-        if width > self.preview_width:
-            aspect_ratio = height / width
-            preview = cv2.resize(
-                preview,
-                (self.preview_width, int(self.preview_width * aspect_ratio)),
-            )
-            height, width = preview.shape[:2]
-
-        success, buffer = cv2.imencode(
-            ".jpg",
-            preview,
-            [cv2.IMWRITE_JPEG_QUALITY, 65],
-        )
-        if not success:
-            return None, width, height
-
-        return base64.b64encode(buffer).decode("utf-8"), width, height
 
     def _to_jsonable(self, obj):
         if obj is None or isinstance(obj, (str, int, float, bool)):

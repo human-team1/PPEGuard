@@ -34,6 +34,17 @@ class VideoAnalysisFileService:
         cv2.imwrite(saved_path, frame_image)
         return saved_path
 
+    def save_webcam_frame(self, session_id: str, frame_no: int, frame_image):
+        if frame_image is None:
+            return None
+        if getattr(frame_image, "size", 0) == 0:
+            return None
+
+        filename = f"{session_id}_webcam_f{frame_no}.jpg"
+        saved_path = os.path.join(self.crop_dir, filename)
+        cv2.imwrite(saved_path, frame_image)
+        return saved_path
+
     def delete_file(self, path: str | None) -> None:
         if not path:
             return

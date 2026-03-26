@@ -8,9 +8,12 @@ from app.application.dtos import ProcessDetectionCommand, StartSessionCommand
 from app.domain.entities.analysis_session import AnalysisSourceType
 from app.domain.entities.detection_result import ItemWearStatus
 from app.infrastructure.dependencies import (
+    build_get_recent_sessions_usecase,
     build_get_session_frames_usecase,
     build_get_session_results_usecase,
     build_get_session_segments_usecase,
+    build_get_session_track_detail_usecase,
+    build_get_session_tracks_usecase,
     build_get_session_usecase,
     build_process_detection_result_usecase,
     build_start_session_usecase,
@@ -55,6 +58,18 @@ def create_session():
     session = usecase.execute(cmd)
 
     return jsonify(serialize(session)), 201
+
+
+@sessions_bp.route("", methods=["GET"])
+def list_sessions():
+    try:
+        limit = int(request.args.get("limit", 20))
+    except ValueError:
+        return jsonify({"error": "Invalid limit parameter"}), 400
+
+    usecase = build_get_recent_sessions_usecase()
+    sessions = usecase.execute(limit=limit)
+    return jsonify(serialize(sessions)), 200
 
 
 @sessions_bp.route("/<session_id>", methods=["GET"])
@@ -112,6 +127,32 @@ def get_session_segments(session_id: str):
         return jsonify(serialize(segments)), 200
     except ValueError:
         return jsonify({"error": "Session not found"}), 404
+
+
+@sessions_bp.route("/<session_id>/tracks", methods=["GET"])
+def get_session_tracks(session_id: str):
+    usecase = build_get_session_tracks_usecase()
+    try:
+        tracks = usecase.execute(session_id)
+        return jsonify(serialize(tracks)), 200
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            return jsonify({"error": message}), 404
+        return jsonify({"error": message}), 400
+
+
+@sessions_bp.route("/<session_id>/tracks/<int:track_id>", methods=["GET"])
+def get_session_track_detail(session_id: str, track_id: int):
+    usecase = build_get_session_track_detail_usecase()
+    try:
+        track = usecase.execute(session_id, track_id)
+        return jsonify(serialize(track)), 200
+    except ValueError as exc:
+        message = str(exc)
+        if "not found" in message.lower():
+            return jsonify({"error": message}), 404
+        return jsonify({"error": message}), 400
 
 
 @sessions_bp.route("/<session_id>/results", methods=["POST"])

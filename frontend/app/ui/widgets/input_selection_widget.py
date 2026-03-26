@@ -15,13 +15,13 @@ from PySide6.QtWidgets import (
 
 from app.config.inspection_items import INSPECTION_ITEMS
 from app.ui.widgets.inspection_item_settings_widget import InspectionItemSettingsWidget
-from app.ui.widgets.webcam_preview_widget import WebcamPreviewWidget
 
 
 class InputSelectionWidget(QGroupBox):
-    analysis_requested = Signal(str, str, object)
+    analysis_requested = Signal(str, str, object, list)
     analysis_stop_requested = Signal()
     inspection_items_changed = Signal(list)
+    source_type_changed = Signal(str)
 
     STATE_CONFIG = {
         "대기": {
@@ -81,6 +81,7 @@ class InputSelectionWidget(QGroupBox):
         self.selected_item_keys = selected_item_keys or []
         self.current_state = "대기"
         self._init_ui()
+        self._emit_current_source_type()
         self.set_analysis_state("대기")
 
     def _init_ui(self):
@@ -127,10 +128,6 @@ class InputSelectionWidget(QGroupBox):
             "직접 입력하지 않으면 서버 현재 시각이 사용될 수 있습니다."
         )
         layout.addWidget(self.time_edit)
-
-        self.webcam_preview = WebcamPreviewWidget()
-        self.webcam_preview.hide()
-        layout.addWidget(self.webcam_preview)
 
         self.inspection_settings_widget = InspectionItemSettingsWidget(
             INSPECTION_ITEMS,
@@ -208,8 +205,6 @@ class InputSelectionWidget(QGroupBox):
 
     def _on_mode_changed(self):
         if self.radio_file.isChecked():
-            self.webcam_preview.stop_camera()
-            self.webcam_preview.hide()
             self.file_picker_widget.show()
             self.time_checkbox.setEnabled(True)
             should_enable_time_edit = self.time_checkbox.isChecked()
@@ -217,8 +212,6 @@ class InputSelectionWidget(QGroupBox):
             self.time_edit.setReadOnly(False)
         else:
             self.file_picker_widget.hide()
-            self.webcam_preview.hide()
-            self.webcam_preview.start_camera(camera_id=0)
             self.time_checkbox.setEnabled(False)
             self.time_edit.setEnabled(False)
             self.time_edit.setReadOnly(False)
@@ -230,6 +223,7 @@ class InputSelectionWidget(QGroupBox):
             f"time_edit_enabled={self.time_edit.isEnabled()}",
             flush=True,
         )
+        self._emit_current_source_type()
         self.set_analysis_state(self.current_state)
 
     def _select_file(self):
@@ -293,7 +287,25 @@ class InputSelectionWidget(QGroupBox):
             video_started_at = None
             if self.time_checkbox.isChecked():
                 video_started_at = self.time_edit.dateTime().toString("yyyy-MM-ddTHH:mm:ss")
-            self.analysis_requested.emit("VIDEO_FILE", self.selected_file_path, video_started_at)
+            self.analysis_requested.emit(
+                "VIDEO_FILE",
+                self.selected_file_path,
+                video_started_at,
+                self.get_selected_inspection_item_keys(),
+            )
             return
 
-        self.analysis_requested.emit("WEBCAM", "0", None)
+        self.analysis_requested.emit(
+            "WEBCAM",
+            "0",
+            None,
+            self.get_selected_inspection_item_keys(),
+        )
+
+    def get_current_source_type(self) -> str:
+        return "VIDEO_FILE" if self.radio_file.isChecked() else "WEBCAM"
+
+    def _emit_current_source_type(self):
+        source_type = self.get_current_source_type()
+        print(f"[InputSelection] source_type={source_type}", flush=True)
+        self.source_type_changed.emit(source_type)

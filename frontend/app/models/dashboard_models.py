@@ -56,6 +56,14 @@ def map_violation_type(
     return ", ".join(labels) if labels else "-"
 
 
+def get_effective_person_status(person: dict[str, Any], field_name: str) -> str:
+    return (
+        person.get(f"session_final_{field_name}")
+        or person.get(field_name)
+        or "UNKNOWN"
+    )
+
+
 def get_latest_segment(segments: list[dict[str, Any]]) -> dict[str, Any] | None:
     if not segments:
         return None
@@ -154,8 +162,8 @@ class SessionDashboardDto:
             )
 
             for person in segment.get("people", []):
-                helmet_status = person.get("helmet_status", "UNKNOWN")
-                vest_status = person.get("vest_status", "UNKNOWN")
+                helmet_status = get_effective_person_status(person, "helmet_status")
+                vest_status = get_effective_person_status(person, "vest_status")
                 row = SessionPersonRowDto(
                     person_result_id=person.get("person_result_id"),
                     segment_id=segment.get("segment_id", 0),

@@ -3,9 +3,11 @@ import logging
 import queue
 import threading
 import time
+from copy import deepcopy
 from collections import deque
 from concurrent.futures import Future
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 
@@ -151,10 +153,20 @@ class TrackState:
     first_seen_at: float
     last_seen_at: float
     last_bbox: list[int]
+    first_seen_frame_no: int | None = None
+    last_seen_frame_no: int | None = None
     employee_no: str | None = None
+    latest_ocr_text: str | None = None
+    latest_ocr_confidence: float | None = None
     ocr_confirmed: bool = False
     last_ocr_at_sec: float | None = None
     ocr_attempt_count: int = 0
+    violation_count: int = 0
+    best_image_path: str | None = None
+    best_frame_score: float = -1.0
+    best_frame_frame_no: int | None = None
+    last_violation_state: bool = False
+    last_violation_counted_at: float | None = None
     ocr_candidates: deque = field(default_factory=deque)
     ppe_observations: deque = field(default_factory=deque)
     last_snapshot: dict = field(default_factory=dict)
@@ -169,7 +181,7 @@ class WebcamRealtimePipelineService:
         analyze_worker,
         ocr_engine,
         ocr_service,
-        segment_result_service,
+        result_persistence_service,
         realtime_event_service,
         capture_fps: float,
         analysis_fps: float,
@@ -188,7 +200,7 @@ class WebcamRealtimePipelineService:
         self.analyze_worker = analyze_worker
         self.ocr_engine = ocr_engine
         self.ocr_service = ocr_service
-        self.segment_result_service = segment_result_service
+        self.result_persistence_service = result_persistence_service
         self.realtime_event_service = realtime_event_service
         self.capture_fps = max(float(capture_fps or 0.0), 0.1)
         self.analysis_fps = max(float(analysis_fps or 0.0), 0.1)
@@ -256,7 +268,7 @@ class WebcamRealtimePipelineService:
         self.aggregator_thread.start()
         self.event_thread.start()
 
-    def submit_frame(self, image_base64: str) -> None:
+    def submit_frame(self, image_base64: str, frame_no: int | None = None) -> None:
         if not image_base64:
             return
 
@@ -266,10 +278,11 @@ class WebcamRealtimePipelineService:
             return
 
         self.last_capture_accept_at = now
-        self.received_frame_count += 1
+        assigned_frame_no = int(frame_no) if frame_no is not None else (self.received_frame_count + 1)
+        self.received_frame_count = max(self.received_frame_count + 1, assigned_frame_no)
         dropped = self.frame_queue.put_latest(
             RawWebcamFrame(
-                frame_no=self.received_frame_count,
+                frame_no=assigned_frame_no,
                 received_at=now,
                 image_base64=image_base64,
             )
@@ -309,6 +322,7 @@ class WebcamRealtimePipelineService:
         self.yolo_result_queue.drain()
         self.event_queue.drain()
         for track_state in self.tracks.values():
+            self.result_persistence_service.flush_track_summary(self.session, track_state)
             self._cleanup_track_state(track_state)
         self.tracks.clear()
         elapsed_sec = time.time() - self.started_at
@@ -410,14 +424,20 @@ class WebcamRealtimePipelineService:
         current_time_sec = result.frame_time_sec
         preview_detections = []
         confirm_events = []
+        should_persist_frame = False
 
         for person in result.people:
             person.latest_ocr_candidate = None
             person.latest_ocr_regex_matched = False
             person.latest_ocr_raw_text = None
 
-            track_state = self._get_or_create_track_state(person, current_time_sec)
-            self._apply_track_snapshot(track_state, person, current_time_sec)
+            track_state, is_new_track = self._get_or_create_track_state(
+                person,
+                current_time_sec,
+                result.frame_no,
+            )
+            self._apply_track_snapshot(track_state, person, current_time_sec, result.frame_no)
+            should_persist_frame = should_persist_frame or is_new_track
 
             if self._should_run_ocr(track_state, person, current_time_sec):
                 track_state.last_ocr_at_sec = current_time_sec
@@ -429,22 +449,29 @@ class WebcamRealtimePipelineService:
                 confirm_event = self._build_track_confirmed_event(track_state, person, current_time_sec)
                 if confirm_event is not None:
                     confirm_events.append(confirm_event)
+                should_persist_frame = True
 
+            self._update_best_frame_candidate(track_state, person, result.frame_no)
             preview_detections.append(self._build_preview_detection(person, track_state))
             self._build_track_summary(track_state, person)
+            if preview_detections[-1].get("violation_type") != "normal":
+                should_persist_frame = True
 
         self.processed_frame_count += 1
-        self.segment_result_service.ingest_frame(
-            session=self.session,
-            frame_no=result.frame_no,
-            frame_time_sec=current_time_sec,
-            frame=result.frame,
-            people=result.people,
-        )
-
+        if should_persist_frame:
+            self.result_persistence_service.persist_frame_event(
+                session=self.session,
+                frame_no=result.frame_no,
+                frame_time_sec=current_time_sec,
+                frame=result.frame,
+                people=result.people,
+                track_states=self.tracks,
+                reason="webcam_event",
+            )
         self._cleanup_expired_tracks(current_time_sec)
         summary_tracks = self._collect_active_track_summaries()
         self._enqueue_realtime_events(
+            frame_no=result.frame_no,
             current_time_sec=current_time_sec,
             frame=result.frame,
             preview_detections=preview_detections,
@@ -462,12 +489,24 @@ class WebcamRealtimePipelineService:
 
     def _enqueue_realtime_events(
         self,
+        frame_no: int,
         current_time_sec: float,
         frame,
         preview_detections: list[dict],
         summary_tracks: list[dict],
         confirm_events: list[dict],
     ) -> None:
+        active_person_count = len(summary_tracks)
+        violating_person_count = sum(
+            1
+            for item in summary_tracks
+            if item.get("helmet_status") == "NOT_WORN" or item.get("vest_status") == "NOT_WORN"
+        )
+        violation_rate = (
+            round((violating_person_count / active_person_count) * 100.0, 2)
+            if active_person_count > 0
+            else 0.0
+        )
         current_counts = {
             "detected_person_count": len(summary_tracks),
             "confirmed_ocr_person_count": sum(
@@ -480,6 +519,7 @@ class WebcamRealtimePipelineService:
                 1 for item in summary_tracks if item.get("vest_status") == "NOT_WORN"
             ),
             "active_track_count": len(summary_tracks),
+            "violating_person_count": violating_person_count,
             "frame_queue_depth": self.frame_queue.qsize(),
         }
 
@@ -495,28 +535,53 @@ class WebcamRealtimePipelineService:
                         "current_time_sec": current_time_sec,
                         "total_time_sec": 0.0,
                         "processed_frames": self.processed_frame_count,
+                        "active_person_count": active_person_count,
+                        "violating_person_count": violating_person_count,
+                        "violation_rate": violation_rate,
                         "current_counts": current_counts,
-                        "track_summaries": summary_tracks,
+                        "track_summaries": deepcopy(summary_tracks),
                     },
                 )
             )
 
         if (now - self.last_preview_emit_at) >= self.realtime_event_service.min_emit_interval_sec:
             self.last_preview_emit_at = now
+            tracks_count = len(summary_tracks)
+            detections_count = len(preview_detections)
+            violations_count = sum(
+                1
+                for detection in preview_detections
+                if detection.get("violation_type") not in (None, "", "normal")
+            )
+            logger.info(
+                "[WebcamEmit] enqueue frame_result session_id=%s frame_no=%s processed_frames=%s tracks_count=%s detections_count=%s violations_count=%s",
+                self.session.session_id,
+                frame_no,
+                self.processed_frame_count,
+                tracks_count,
+                detections_count,
+                violations_count,
+            )
             self.event_queue.put_latest(
                 (
                     "frame_result",
                     {
                         "session_id": self.session.session_id,
                         "source_type": "WEBCAM",
-                        "frame": frame,
-                        "detections": preview_detections,
+                        "processed_frames": self.processed_frame_count,
+                        "tracks_count": tracks_count,
+                        "violations_count": violations_count,
+                        "frame_no": frame_no,
+                        "frame_time_sec": current_time_sec,
+                        "frame_width": int(frame.shape[1]) if frame is not None else 0,
+                        "frame_height": int(frame.shape[0]) if frame is not None else 0,
+                        "detections": deepcopy(preview_detections),
                     },
                 )
             )
 
         for confirm_event in confirm_events:
-            self.event_queue.put_latest(("track_confirmed", confirm_event))
+            self.event_queue.put_latest(("track_confirmed", deepcopy(confirm_event)))
 
     def _run_event_loop(self) -> None:
         while not self.stop_event.is_set():
@@ -561,22 +626,32 @@ class WebcamRealtimePipelineService:
         self.total_ocr_time_sec += time.perf_counter() - started_at
         return result
 
-    def _get_or_create_track_state(self, person, current_time_sec: float) -> TrackState:
+    def _get_or_create_track_state(self, person, current_time_sec: float, frame_no: int) -> tuple[TrackState, bool]:
         with self.state_lock:
             state = self.tracks.get(person.id)
+            created = False
             if state is None:
                 state = TrackState(
                     track_id=person.id,
                     first_seen_at=current_time_sec,
                     last_seen_at=current_time_sec,
+                    first_seen_frame_no=frame_no,
+                    last_seen_frame_no=frame_no,
                     last_bbox=list(person.bbox),
                 )
                 self.tracks[person.id] = state
-            return state
+                created = True
+            return state, created
 
-    def _apply_track_snapshot(self, track_state: TrackState, person, current_time_sec: float) -> None:
+    def _apply_track_snapshot(self, track_state: TrackState, person, current_time_sec: float, frame_no: int) -> None:
         track_state.last_seen_at = current_time_sec
+        track_state.last_seen_frame_no = frame_no
         track_state.last_bbox = list(person.bbox)
+        is_violating = (not person.has_helmet) or (not person.has_vest)
+        if is_violating and not track_state.last_violation_state:
+            track_state.violation_count += 1
+            track_state.last_violation_counted_at = current_time_sec
+        track_state.last_violation_state = is_violating
         track_state.ppe_observations.append(
             {
                 "time_sec": current_time_sec,
@@ -589,6 +664,20 @@ class WebcamRealtimePipelineService:
         if track_state.ocr_confirmed:
             person.employee_no = track_state.employee_no
             person.ocr_confirmed = True
+
+    def _update_best_frame_candidate(self, track_state: TrackState, person, frame_no: int) -> None:
+        bbox = getattr(person, "bbox", [0, 0, 0, 0]) or [0, 0, 0, 0]
+        area = max(int(bbox[2]) - int(bbox[0]), 0) * max(int(bbox[3]) - int(bbox[1]), 0)
+        score = area / 1000.0
+        if track_state.ocr_confirmed:
+            score += 1000.0
+        if (not person.has_helmet) or (not person.has_vest):
+            score += 200.0
+        score += 50.0
+        score += float(track_state.latest_ocr_confidence or 0.0) * 100.0
+        if score >= track_state.best_frame_score:
+            track_state.best_frame_score = score
+            track_state.best_frame_frame_no = frame_no
 
     def _apply_ocr_to_track(self, track_state: TrackState, person, current_time_sec: float) -> None:
         candidate = getattr(person, "latest_ocr_candidate", None)
@@ -604,6 +693,8 @@ class WebcamRealtimePipelineService:
 
         if candidate and getattr(person, "latest_ocr_regex_matched", False):
             track_state.employee_no = candidate
+            track_state.latest_ocr_text = getattr(person, "latest_ocr_raw_text", None)
+            track_state.latest_ocr_confidence = float(getattr(person, "ocr_confidence", 0.0) or 0.0)
             track_state.ocr_confirmed = True
             person.employee_no = candidate
             person.ocr_confirmed = True
@@ -658,13 +749,20 @@ class WebcamRealtimePipelineService:
         return True
 
     def _build_preview_detection(self, person, track_state: TrackState) -> dict:
+        violation_types = []
+        if not person.has_helmet:
+            violation_types.append("helmet_missing")
+        if not person.has_vest:
+            violation_types.append("vest_missing")
         return {
             "track_id": person.id,
             "employee_id": track_state.employee_no,
+            "employee_no": track_state.employee_no,
             "ocr_number": track_state.employee_no,
             "ocr_confirmed": track_state.ocr_confirmed,
             "helmet_status": "WORN" if person.has_helmet else "NOT_WORN",
             "vest_status": "WORN" if person.has_vest else "NOT_WORN",
+            "violation_type": ",".join(violation_types) if violation_types else "normal",
             "bbox": {
                 "x1": int(person.bbox[0]),
                 "y1": int(person.bbox[1]),
@@ -677,6 +775,7 @@ class WebcamRealtimePipelineService:
         track_state.last_snapshot = {
             "track_id": track_state.track_id,
             "employee_id": track_state.employee_no,
+            "employee_no": track_state.employee_no,
             "ocr_confirmed": track_state.ocr_confirmed,
             "helmet_status": self._resolve_window_status(track_state, "has_helmet"),
             "vest_status": self._resolve_window_status(track_state, "has_vest"),
@@ -725,6 +824,7 @@ class WebcamRealtimePipelineService:
             for track_id in expired_track_ids:
                 expired_state = self.tracks.pop(track_id, None)
                 if expired_state is not None:
+                    self.result_persistence_service.flush_track_summary(self.session, expired_state)
                     logger.warning(
                         "[Track] expired session_id=%s track_id=%s idle_sec=%.2f",
                         self.session.session_id,
@@ -749,7 +849,6 @@ class WebcamRealtimePipelineService:
         except Exception:
             pass
 
-
 class WebcamPipelineManager:
     def __init__(
         self,
@@ -757,7 +856,7 @@ class WebcamPipelineManager:
         ocr_engine,
         ocr_service,
         session_repo,
-        segment_result_service,
+        result_persistence_service,
         realtime_event_service,
         capture_fps: float,
         analysis_fps: float,
@@ -776,7 +875,7 @@ class WebcamPipelineManager:
         self.ocr_engine = ocr_engine
         self.ocr_service = ocr_service
         self.session_repo = session_repo
-        self.segment_result_service = segment_result_service
+        self.result_persistence_service = result_persistence_service
         self.realtime_event_service = realtime_event_service
         self.capture_fps = capture_fps
         self.analysis_fps = analysis_fps
@@ -793,12 +892,12 @@ class WebcamPipelineManager:
         self.pipelines: dict[str, WebcamRealtimePipelineService] = {}
         self.lock = threading.Lock()
 
-    def submit_frame(self, session_id: str, image_base64: str) -> None:
+    def submit_frame(self, session_id: str, image_base64: str, frame_no: int | None = None) -> None:
         if not session_id or not image_base64:
             return
 
         pipeline = self._get_or_create_pipeline(session_id)
-        pipeline.submit_frame(image_base64)
+        pipeline.submit_frame(image_base64, frame_no=frame_no)
 
     def finalize_session(self, session_id: str, reason: str = "finalize") -> None:
         with self.lock:
@@ -810,7 +909,9 @@ class WebcamPipelineManager:
         pipeline.stop(reason=reason)
         session = self.session_repo.find_by_session_id(session_id)
         if session is not None:
-            self.segment_result_service.finalize_session(session, reason=reason)
+            session.processed_frames = pipeline.processed_frame_count
+            session.updated_at = datetime.now()
+            self.session_repo.update(session)
 
     def _get_or_create_pipeline(self, session_id: str) -> WebcamRealtimePipelineService:
         with self.lock:
@@ -822,12 +923,23 @@ class WebcamPipelineManager:
             if session is None:
                 raise ValueError(f"웹캠 세션을 찾을 수 없습니다: {session_id}")
 
+            session_status = getattr(session.status, "value", str(session.status))
+            if session_status != "PROCESSING":
+                logger.warning(
+                    "[Webcam] frame rejected inactive session_id=%s status=%s",
+                    session_id,
+                    session_status,
+                )
+                raise ValueError(
+                    f"?뱀틺 ?몄뀡??鍮꾪솢?깮 ?곹깭?낅땲?? session_id={session_id} status={session_status}"
+                )
+
             pipeline = WebcamRealtimePipelineService(
                 session=session,
                 analyze_worker=self.analyze_worker_factory(),
                 ocr_engine=self.ocr_engine,
                 ocr_service=self.ocr_service,
-                segment_result_service=self.segment_result_service,
+                result_persistence_service=self.result_persistence_service,
                 realtime_event_service=self.realtime_event_service,
                 capture_fps=self.capture_fps,
                 analysis_fps=self.analysis_fps,

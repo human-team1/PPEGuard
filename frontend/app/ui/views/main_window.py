@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QVBoxLayout, QWidget
 
 from app.config.settings import AppSettings
@@ -61,6 +61,9 @@ class MainWindow(QMainWindow):
         self.input_widget.inspection_items_changed.connect(
             self._on_inspection_items_changed
         )
+        self.input_widget.source_type_changed.connect(
+            self.result_view.set_input_source_type
+        )
 
         left_layout.addWidget(self.server_widget)
         left_layout.addWidget(self.input_widget, stretch=1)
@@ -71,6 +74,15 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(content_layout, stretch=1)
 
         self.statusBar().showMessage("대기")
+        self.result_view.set_input_source_type(
+            self.input_widget.get_current_source_type()
+        )
+        QTimer.singleShot(
+            0,
+            lambda: self.result_view.set_input_source_type(
+                self.input_widget.get_current_source_type()
+            ),
+        )
 
     def _apply_analysis_state(self, state: str, message: str | None = None):
         self.current_state = state
@@ -80,7 +92,11 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(detail)
 
     def _handle_analysis_request(
-        self, source_type: str, source_val: str, video_started_at=None
+        self,
+        source_type: str,
+        source_val: str,
+        video_started_at=None,
+        inspection_item_keys: list[str] | None = None,
     ):
         if self.session_worker and self.session_worker.isRunning():
             self._apply_analysis_state("실패", "이미 요청 처리 중입니다. 잠시 후 다시 시도하세요.")
@@ -98,6 +114,7 @@ class MainWindow(QMainWindow):
                 self.api_client.upload_video,
                 video_path=source_val,
                 video_started_at=video_started_at,
+                inspection_item_keys=inspection_item_keys or [],
             )
             # (추가) 목적/이유: 동영상 분석은 시간이 소요되므로 업로드 즉시 '분석중' 상태로 전이하여 
             # 중단 버튼을 활성화
@@ -109,14 +126,14 @@ class MainWindow(QMainWindow):
                 "웹캠 분석 세션 생성을 요청했습니다.",
             )
             self.session_worker = ApiWorker(
-                self.api_client.start_session,
-                source_type=source_type,
-                source_name="Webcam-Live",
-                frame_interval=3,
+                self.result_view.socket_service.start_webcam_analysis,
+                "Webcam-Live",
+                3,
             )
             self.session_worker.result_ready.connect(self._on_session_started)
 
         self.session_worker.error_occurred.connect(self._on_session_error)
+        self.session_worker.finished.connect(self.session_worker.deleteLater)
         self.session_worker.finished.connect(self._clear_session_worker)
         self.session_worker.start()
 
@@ -152,13 +169,15 @@ class MainWindow(QMainWindow):
         # (추가) 목적/이유: 동영상 분석 세션은 전용 중단 API(/api/v1/video/stop)를 호출해야 함.
         # 현재 화면 모드(radio_file)를 체크하여 적절한 API 호출 선택.
         if self.input_widget.radio_file.isChecked():
-            stop_func = self.api_client.stop_video_analysis
+            self.stop_worker = ApiWorker(self.api_client.stop_video_analysis, self.current_session_id)
         else:
-            stop_func = self.api_client.stop_session
-
-        self.stop_worker = ApiWorker(stop_func, self.current_session_id)
+            self.stop_worker = ApiWorker(
+                self.result_view.socket_service.stop_webcam_analysis,
+                self.current_session_id,
+            )
         self.stop_worker.result_ready.connect(self._on_stop_completed)
         self.stop_worker.error_occurred.connect(self._on_stop_error)
+        self.stop_worker.finished.connect(self.stop_worker.deleteLater)
         self.stop_worker.finished.connect(self._clear_stop_worker)
         self.stop_worker.start()
 
@@ -176,6 +195,9 @@ class MainWindow(QMainWindow):
             self.result_view.set_session_id(self.current_session_id)
 
         self._apply_analysis_state("중지", message)
+        self.result_view.set_input_source_type(
+            self.input_widget.get_current_source_type()
+        )
         self.result_view.load_results()
 
     def _on_session_started(self, payload: dict):
@@ -188,19 +210,20 @@ class MainWindow(QMainWindow):
 
         self.current_session_id = session_id
         self.result_view.set_session_id(session_id)
-        self.input_widget.webcam_preview.start_streaming(session_id)
         self._apply_analysis_state(
             "분석중",
             f"세션 [{session_id[:8]}] 분석중 - 상태: {status}",
         )
-        self.result_view.load_results()
 
     def _on_stop_completed(self, payload: dict):
-        self.input_widget.webcam_preview.stop_streaming()
         self._apply_analysis_state("중지", "웹캠 분석을 중지했습니다.")
         if payload.get("session_id"):
             self.result_view.set_session_id(payload.get("session_id"))
-        self.result_view.load_results()
+        self.result_view.set_input_source_type(
+            self.input_widget.get_current_source_type()
+        )
+        if self.input_widget.get_current_source_type() == "VIDEO_FILE":
+            self.result_view.load_results()
 
     def _on_stop_error(self, err_msg: str):
         self._apply_analysis_state("실패", err_msg)
@@ -248,8 +271,5 @@ class MainWindow(QMainWindow):
 
         if hasattr(self, "result_view"):
             self.result_view.socket_service.disconnect_server()
-
-        if hasattr(self, "input_widget") and hasattr(self.input_widget, "webcam_preview"):
-            self.input_widget.webcam_preview.stop_camera()
 
         event.accept()

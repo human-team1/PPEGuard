@@ -110,6 +110,10 @@ class SegmentPersonState:
     ocr_confirmed: bool = False
     last_ocr_at_sec: float | None = None
     ocr_candidate_counts: dict[str, int] = field(default_factory=dict)
+    ocr_attempt_count: int = 0
+    last_regex_matched: bool = False
+    current_violation_flags: dict[str, bool] = field(default_factory=dict)
+    has_selected_item_violation: bool = False
 
 
 class VideoSegmentPipelineService:
@@ -126,6 +130,7 @@ class VideoSegmentPipelineService:
         max_concurrent_segments: int,
         yolo_worker_count: int,
         ocr_worker_count: int,
+        max_track_ocr_count: int,
     ):
         self.analyze_worker = analyze_worker
         self.ocr_engine = ocr_engine
@@ -136,6 +141,7 @@ class VideoSegmentPipelineService:
         self.segment_window_service = segment_window_service
         self.analysis_fps = 1.0
         self.max_concurrent_segments = max(int(max_concurrent_segments or 0), 1)
+        self.max_track_ocr_count = max(int(max_track_ocr_count or 0), 1)
         self.yolo_pool = QueueWorkerPool(
             name="yolo",
             worker_count=yolo_worker_count,
@@ -170,6 +176,7 @@ class VideoSegmentPipelineService:
         total_frames: int,
         total_time_sec: float,
         source_type: str,
+        inspection_item_keys: list[str] | None = None,
         stop_signal = None,
     ) -> int | None:
         tasks = self._build_segment_tasks(total_frames=total_frames, total_time_sec=total_time_sec, fps=fps)
@@ -192,6 +199,7 @@ class VideoSegmentPipelineService:
                     "session_id": session.session_id,
                     "video_path": video_path,
                     "fps": fps,
+                    "inspection_item_keys": inspection_item_keys,
                 },
                 name=f"segment-worker-{index + 1}",
                 daemon=True,
@@ -266,7 +274,13 @@ class VideoSegmentPipelineService:
 
         return processed_frames
 
-    def _run_segment_worker(self, session_id: str, video_path: str, fps: float) -> None:
+    def _run_segment_worker(
+        self,
+        session_id: str,
+        video_path: str,
+        fps: float,
+        inspection_item_keys: list[str] | None,
+    ) -> None:
         while not self.stop_event.is_set():
             task = self.segment_tasks.get()
             if task is None:
@@ -279,6 +293,7 @@ class VideoSegmentPipelineService:
                     video_path=video_path,
                     fps=fps,
                     task=task,
+                    inspection_item_keys=inspection_item_keys,
                 )
                 self.segment_results.put(result)
             except Exception as exc:
@@ -297,6 +312,7 @@ class VideoSegmentPipelineService:
         video_path: str,
         fps: float,
         task: VideoSegmentTask,
+        inspection_item_keys: list[str] | None,
     ) -> VideoSegmentResult:
         segment_started_at = time.perf_counter()
         cap = cv2.VideoCapture(video_path)
@@ -306,12 +322,16 @@ class VideoSegmentPipelineService:
         aggregation = SegmentAggregationService(
             best_frame_selector=BestFrameSelector(),
             file_service=self.file_service,
+            active_inspection_items=self.ocr_service.normalize_inspection_item_keys(
+                inspection_item_keys
+            ),
         )
 
         sample_step = max(int(round(fps / self.analysis_fps)), 1)
         person_states: dict[int, SegmentPersonState] = {}
         processed_frames = 0
         ocr_request_count = 0
+        violating_candidate_count = 0
 
         try:
             cap.set(cv2.CAP_PROP_POS_FRAMES, task.start_frame_index)
@@ -337,10 +357,31 @@ class VideoSegmentPipelineService:
 
                 ocr_jobs = []
                 for person in people:
-                    if not self._should_request_ocr(person):
+                    violation_flags = self.ocr_service.get_selected_item_violation_flags(
+                        person,
+                        inspection_item_keys,
+                    )
+                    has_selected_item_violation = any(violation_flags.values())
+                    state = person_states.get(person.id)
+                    if state is not None:
+                        state.current_violation_flags = dict(violation_flags)
+                        state.has_selected_item_violation = has_selected_item_violation
+
+                    if has_selected_item_violation:
+                        violating_candidate_count += 1
+
+                    if not self._should_request_ocr(
+                        person=person,
+                        current_time_sec=frame_time_sec,
+                        inspection_item_keys=inspection_item_keys,
+                        state=state,
+                    ):
                         continue
 
                     person.last_ocr_at_sec = frame_time_sec
+                    if state is not None:
+                        state.last_ocr_at_sec = frame_time_sec
+                        state.ocr_attempt_count += 1
                     ocr_jobs.append((person, self.ocr_pool.submit(person.crop_image)))
                     ocr_request_count += 1
 
@@ -384,11 +425,12 @@ class VideoSegmentPipelineService:
                 ),
             }
             logger.info(
-                "[Segment] processed session_id=%s segment_index=%s frames=%s people=%s ocr_requests=%s elapsed_sec=%.2f",
+                "[Segment] processed session_id=%s segment_index=%s frames=%s people=%s violating_candidates=%s ocr_requests=%s elapsed_sec=%.2f",
                 session_id,
                 task.segment_index,
                 processed_frames,
                 len(people_results),
+                violating_candidate_count,
                 ocr_request_count,
                 time.perf_counter() - segment_started_at,
             )
@@ -441,6 +483,7 @@ class VideoSegmentPipelineService:
             person.ocr_confirmed = state.ocr_confirmed
             person.last_ocr_at_sec = state.last_ocr_at_sec
             person.ocr_candidate_counts = dict(state.ocr_candidate_counts)
+            person.latest_ocr_regex_matched = state.last_regex_matched
             tracked_people.append(person)
 
         return tracked_people
@@ -450,6 +493,7 @@ class VideoSegmentPipelineService:
         state.ocr_confirmed = bool(getattr(person, "ocr_confirmed", False))
         state.last_ocr_at_sec = getattr(person, "last_ocr_at_sec", None)
         state.ocr_candidate_counts = dict(getattr(person, "ocr_candidate_counts", {}))
+        state.last_regex_matched = bool(getattr(person, "latest_ocr_regex_matched", False))
 
     def _build_segment_tasks(
         self,
@@ -488,12 +532,21 @@ class VideoSegmentPipelineService:
 
         return tasks
 
-    def _should_request_ocr(self, person) -> bool:
-        if getattr(person, "ocr_confirmed", False):
-            return False
-        if person.crop_image is None or getattr(person.crop_image, "size", 0) == 0:
-            return False
-        return True
+    def _should_request_ocr(
+        self,
+        person,
+        current_time_sec: float,
+        inspection_item_keys: list[str] | None,
+        state: SegmentPersonState | None,
+    ) -> bool:
+        ocr_attempt_count = state.ocr_attempt_count if state is not None else 0
+        return self.ocr_service.should_run_ocr_for_person(
+            person=person,
+            current_time_sec=current_time_sec,
+            inspection_item_keys=inspection_item_keys,
+            ocr_attempt_count=ocr_attempt_count,
+            max_attempt_count=self.max_track_ocr_count,
+        )
 
     def _calculate_iou(self, bbox1: list[int], bbox2: list[int]) -> float:
         x1 = max(bbox1[0], bbox2[0])

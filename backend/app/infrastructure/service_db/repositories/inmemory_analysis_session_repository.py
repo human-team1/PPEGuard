@@ -14,3 +14,8 @@ class InMemoryAnalysisSessionRepository(AnalysisSessionRepository):
 
     def update(self, session: AnalysisSession): 
         self.sessions[session.session_id] = session
+
+    def find_recent(self, limit: int):
+        sessions = list(self.sessions.values())
+        sessions.sort(key=lambda item: item.created_at, reverse=True)
+        return sessions[:limit]

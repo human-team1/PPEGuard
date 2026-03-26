@@ -23,6 +23,7 @@ class AnalyzeFrameUseCase:
         self.webcam_pipeline_manager.submit_frame(
             session_id=command.session_id,
             image_base64=command.image_base64,
+            frame_no=command.frame_no,
         )
 
     def finalize_session(self, session_id: str, reason: str = "finalize") -> None:

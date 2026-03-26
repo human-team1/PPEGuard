@@ -1,3 +1,4 @@
+import json
 import os
 from typing import Any, Dict
 
@@ -17,7 +18,7 @@ class ApiClient:
         if isinstance(e, requests.exceptions.ConnectionError):
             raise ConnectionError(f"{action_msg}\n(원인: 서버 연결 실패)")
         if isinstance(e, requests.exceptions.HTTPError):
-            status = getattr(e.response, "status_code", "알 수 없음")
+            status = getattr(e.response, "status_code", "알수없음")
             details = ""
             try:
                 resp_json = e.response.json()
@@ -66,19 +67,22 @@ class ApiClient:
         except requests.exceptions.RequestException as e:
             self._handle_request_error(e, "분석 종료 요청에 실패했습니다.")
 
-        # (추가) 목적/이유: 동영상 분석 세션에 대해 백엔드의 /api/v1/video/stop API를 호출
     def stop_video_analysis(self, session_id: str | None = None) -> Dict[str, Any]:
         url = f"{self.base_url}/api/v1/video/stop"
         try:
             payload = {"session_id": session_id} if session_id else {}
             response = requests.post(url, json=payload, timeout=5)
-
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
             self._handle_request_error(e, "동영상 분석 중단 요청에 실패했습니다.")
 
-    def upload_video(self, video_path: str, video_started_at: str = None) -> Dict[str, Any]:
+    def upload_video(
+        self,
+        video_path: str,
+        video_started_at: str = None,
+        inspection_item_keys: list[str] | None = None,
+    ) -> Dict[str, Any]:
         url = f"{self.base_url}/api/v1/video"
         if not os.path.exists(video_path):
             raise ConnectionError("선택한 동영상 파일을 찾을 수 없습니다.")
@@ -91,6 +95,8 @@ class ApiClient:
                 data = {}
                 if video_started_at:
                     data["video_started_at"] = video_started_at
+                if inspection_item_keys is not None:
+                    data["inspection_item_keys"] = json.dumps(inspection_item_keys)
 
                 response = requests.post(url, files=files, data=data, timeout=300)
                 response.raise_for_status()
@@ -133,3 +139,30 @@ class ApiClient:
             return response.json()
         except requests.exceptions.RequestException as e:
             self._handle_request_error(e, "세션 세그먼트 결과를 불러오지 못했습니다.")
+
+    def get_session_tracks(self, session_id: str, timeout_sec: int = 5) -> dict:
+        url = f"{self.base_url}/api/v1/sessions/{session_id}/tracks"
+        try:
+            response = requests.get(url, timeout=timeout_sec)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            self._handle_request_error(e, "?몄뀡 異붿쟻 寃곌낵瑜?遺덈윭?ㅼ? 紐삵뻽?듬땲??")
+
+    def get_session_track_detail(self, session_id: str, track_id: int, timeout_sec: int = 5) -> dict:
+        url = f"{self.base_url}/api/v1/sessions/{session_id}/tracks/{track_id}"
+        try:
+            response = requests.get(url, timeout=timeout_sec)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            self._handle_request_error(e, "?붿쟻 寃곌낵 ?곸꽭瑜?遺덈윭?ㅼ? 紐삵뻽?듬땲??")
+
+    def get_sessions(self, limit: int = 20) -> dict:
+        url = f"{self.base_url}/api/v1/sessions"
+        try:
+            response = requests.get(url, params={"limit": limit}, timeout=5)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            self._handle_request_error(e, "세션 목록을 불러오지 못했습니다.")

@@ -3,6 +3,7 @@ from ..entities.analysis_session import AnalysisSession
 from ..entities.analysis_frame import AnalysisFrame
 from ..entities.detection_result import DetectionResult
 from ..entities.analysis_segment import AnalysisSegmentSummary, AnalysisSegmentPersonResult
+from ..entities.analysis_track_summary import AnalysisTrackSummary
 
 class AnalysisSessionRepository(abc.ABC):
     @abc.abstractmethod
@@ -15,6 +16,10 @@ class AnalysisSessionRepository(abc.ABC):
 
     @abc.abstractmethod
     def update(self, session: AnalysisSession):
+        pass
+
+    @abc.abstractmethod
+    def find_recent(self, limit: int):
         pass
 
     @abc.abstractmethod
@@ -74,6 +79,20 @@ class AnalysisSegmentPersonResultRepository(abc.ABC):
 
     @abc.abstractmethod
     def find_by_segment_summary_ids(self, segment_summary_ids: list[int]):
+        pass
+
+
+class AnalysisTrackSummaryRepository(abc.ABC):
+    @abc.abstractmethod
+    def upsert(self, summary: AnalysisTrackSummary):
+        pass
+
+    @abc.abstractmethod
+    def find_by_session_id(self, session_id: int):
+        pass
+
+    @abc.abstractmethod
+    def find_by_session_and_track_id(self, session_id: int, track_id: int):
         pass
 
 

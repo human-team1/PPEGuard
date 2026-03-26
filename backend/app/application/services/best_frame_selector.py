@@ -4,20 +4,12 @@ class BestFrameSelector:
             return True
 
         candidate_key = (
-            candidate["confirmed_ocr_person_count"],
             candidate["violation_person_count"],
-            candidate["regex_match_count"],
-            candidate["max_bbox_area"],
-            candidate["person_count"],
-            candidate["avg_ocr_confidence"],
+            candidate["confirmed_violation_person_count"],
         )
         best_key = (
-            current_best["confirmed_ocr_person_count"],
             current_best["violation_person_count"],
-            current_best["regex_match_count"],
-            current_best["max_bbox_area"],
-            current_best["person_count"],
-            current_best["avg_ocr_confidence"],
+            current_best["confirmed_violation_person_count"],
         )
 
         if candidate_key != best_key:

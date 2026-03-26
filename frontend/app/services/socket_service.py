@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 class SocketService(QObject):
     analysis_progress_ready = Signal(dict)
     analysis_frame_result_ready = Signal(dict)
+    analysis_track_confirmed_ready = Signal(dict)
     analysis_segment_saved = Signal(dict)
     analysis_session_status_changed = Signal(dict)
     connected = Signal()
@@ -22,14 +23,14 @@ class SocketService(QObject):
     def __init__(self, server_url: str = "http://127.0.0.1:5000"):
         super().__init__()
         self.server_url = server_url
-        # diagnostic: enable client-side logs for connection abort/disconnect tracing
         self.sio = socketio.Client(
-            logger=True,
-            engineio_logger=True,
+            logger=False,
+            engineio_logger=False,
             reconnection=True,
         )
         self.session_id = None
-        self.streaming_enabled = False
+        self.analysis_active = False
+        self.next_frame_no = 0
         # diagnostic: None keeps the default transport negotiation order.
         # temporary debugging: switch to ["polling"] or ["websocket"] when comparing behaviors.
         self._connect_transports = None
@@ -72,10 +73,14 @@ class SocketService(QObject):
 
         @self.sio.on("analysis_frame_result")
         def on_analysis_frame_result(data):
-            logger.debug(
-                "[Socket] analysis_frame_result received session_id=%s detections=%s",
+            logger.info(
+                "[Socket] analysis_frame_result received session_id=%s frame_no=%s payload_keys=%s tracks_count=%s detections_count=%s image_len=%s",
                 data.get("session_id"),
+                data.get("frame_no"),
+                sorted(list(data.keys())),
+                data.get("tracks_count", 0),
                 len(data.get("detections", [])),
+                0,
             )
             self.analysis_frame_result_ready.emit(data)
 
@@ -86,6 +91,7 @@ class SocketService(QObject):
                 data.get("track_id"),
                 data.get("employee_id"),
             )
+            self.analysis_track_confirmed_ready.emit(data)
 
         @self.sio.on("analysis_segment_saved")
         def on_analysis_segment_saved(data):
@@ -141,8 +147,9 @@ class SocketService(QObject):
             return False
 
     def disconnect_server(self):
-        self.streaming_enabled = False
+        self.analysis_active = False
         self.session_id = None
+        self.next_frame_no = 0
         if self.sio.connected:
             logger.info(
                 "[Socket] disconnect requested url=%s sid=%s",
@@ -151,28 +158,60 @@ class SocketService(QObject):
             )
             self.sio.disconnect()
 
-    def start_streaming(self, session_id: str):
-        self.session_id = session_id
-        self.streaming_enabled = True
+    def start_webcam_analysis(
+        self,
+        source_name: str = "Webcam-Live",
+        frame_interval: int = 3,
+    ) -> dict:
         connected = self.connect_server()
+        if not connected:
+            raise ConnectionError("소켓 서버 연결에 실패했습니다.")
+
+        payload = self.sio.call(
+            "start_webcam_analysis",
+            {
+                "source_name": source_name,
+                "frame_interval_sec": frame_interval,
+                "requested_by": "desktop-client",
+            },
+            timeout=5,
+        )
+        self.session_id = payload.get("session_id")
+        self.analysis_active = bool(self.session_id)
+        self.next_frame_no = 0
         logger.info(
             "[AnalysisSession] started session_id=%s source=webcam connected=%s",
-            session_id,
+            self.session_id,
             connected,
         )
+        return payload
 
-    def stop_streaming(self):
-        if self.streaming_enabled or self.session_id:
-            logger.info("[AnalysisSession] stopped session_id=%s source=webcam", self.session_id)
-        self.streaming_enabled = False
+    def stop_webcam_analysis(self, session_id: str | None = None) -> dict:
+        target_session_id = session_id or self.session_id
+        if not target_session_id:
+            raise ConnectionError("중지할 웹캠 세션이 없습니다.")
+        connected = self.connect_server()
+        if not connected:
+            raise ConnectionError("소켓 서버 연결에 실패했습니다.")
+
+        payload = self.sio.call(
+            "stop_webcam_analysis",
+            {"session_id": target_session_id},
+            timeout=5,
+        )
+        logger.info("[AnalysisSession] stopped session_id=%s source=webcam", target_session_id)
+        self.analysis_active = False
         self.session_id = None
+        self.next_frame_no = 0
+        return payload
 
-    def send_frame(self, frame_np: np.ndarray):
-        if not self.streaming_enabled:
+    def send_analysis_sample(self, frame_np: np.ndarray):
+        if not self.analysis_active:
+            logger.debug("[Webcam] analysis sample skipped inactive session_id=%s", self.session_id)
             return
 
         if not self.session_id:
-            logger.warning("[Webcam] frame send skipped missing_session_id")
+            logger.warning("[Webcam] sample send skipped missing_session_id")
             return
 
         if not self.sio.connected:
@@ -181,22 +220,34 @@ class SocketService(QObject):
                 return
 
         try:
+            self.next_frame_no += 1
+            frame_no = self.next_frame_no
             h, w = frame_np.shape[:2]
             target_width = 640
             if w > target_width:
                 aspect_ratio = h / w
                 frame_np = cv2.resize(frame_np, (target_width, int(target_width * aspect_ratio)))
+                h, w = frame_np.shape[:2]
 
             _, buffer = cv2.imencode(".jpg", frame_np, [cv2.IMWRITE_JPEG_QUALITY, 60])
             b64_frame = base64.b64encode(buffer).decode("utf-8")
 
             self.sio.emit(
-                "frame",
+                "webcam_analysis_frame",
                 {
                     "image": f"data:image/jpeg;base64,{b64_frame}",
                     "session_id": self.session_id,
+                    "frame_no": frame_no,
+                    "frame_width": w,
+                    "frame_height": h,
                 },
             )
+            logger.debug(
+                "[Webcam] analysis sample sent session_id=%s frame_no=%s image_len=%s",
+                self.session_id,
+                frame_no,
+                len(b64_frame),
+            )
         except Exception as e:
-            logger.exception("[Webcam] frame send failed session_id=%s", self.session_id)
+            logger.exception("[Webcam] sample send failed session_id=%s", self.session_id)
             self.error_occurred.emit(f"프레임 전송 실패: {str(e)}")

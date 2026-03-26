@@ -72,6 +72,7 @@ class VideoAnalysisService:
         self.max_concurrent_segments = Config.MAX_CONCURRENT_SEGMENTS
         self.yolo_worker_count = Config.YOLO_WORKER_COUNT
         self.ocr_worker_count = Config.OCR_WORKER_COUNT
+        self.max_track_ocr_count = Config.VIDEO_MAX_TRACK_OCR_COUNT
 
         self.file_service = VideoAnalysisFileService(
             upload_dir=self.upload_dir,
@@ -94,6 +95,7 @@ class VideoAnalysisService:
         frame_interval_sec: int,
         requested_by: str = "desktop-client",
         video_started_at: str | None = None,
+        inspection_item_keys: list[str] | None = None,
     ):
         started_at = time.perf_counter()
         logger.info("[AnalysisSession] video analysis requested requested_by=%s", requested_by)
@@ -157,6 +159,10 @@ class VideoAnalysisService:
             "[VideoAnalysis] frame_interval_sec is metadata only video path uses fixed analysis_fps=%s",
             self.analysis_fps,
         )
+        logger.info(
+            "[VideoAnalysis] inspection_item_keys=%s",
+            inspection_item_keys or ["helmet", "vest"],
+        )
 
         start_cmd = StartSessionCommand(
             source_type=AnalysisSourceType.VIDEO_FILE,
@@ -199,6 +205,7 @@ class VideoAnalysisService:
                 max_concurrent_segments=self.max_concurrent_segments,
                 yolo_worker_count=self.yolo_worker_count,
                 ocr_worker_count=self.ocr_worker_count,
+                max_track_ocr_count=self.max_track_ocr_count,
             )
             try:
                 processed_frame_count = pipeline.process_video(
@@ -208,6 +215,7 @@ class VideoAnalysisService:
                     total_frames=total_frames,
                     total_time_sec=total_time_sec,
                     source_type=AnalysisSourceType.VIDEO_FILE.value,
+                    inspection_item_keys=inspection_item_keys,
                     stop_signal=lambda: session_id in VideoAnalysisService._stopped_sessions,
                 )
             finally:

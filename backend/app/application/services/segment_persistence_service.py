@@ -64,6 +64,10 @@ class SegmentPersistenceService:
                 helmet_detected_frames=person["helmet_detected_frames"],
                 vest_detected_frames=person["vest_detected_frames"],
                 regex_match_count=person["regex_match_count"],
+                bbox_x1=(person.get("bbox") or {}).get("x1"),
+                bbox_y1=(person.get("bbox") or {}).get("y1"),
+                bbox_x2=(person.get("bbox") or {}).get("x2"),
+                bbox_y2=(person.get("bbox") or {}).get("y2"),
             )
             for person in people_results
         ]
