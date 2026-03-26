@@ -13,6 +13,8 @@ class SQLAlchemyAnalysisFrameRepository(AnalysisFrameRepository):
             frame_time_sec=Decimal(str(model.frame_time_sec)),
             captured_at=model.captured_at,
             frame_image_path=model.frame_image_path,
+            frame_width=model.frame_width,
+            frame_height=model.frame_height,
             person_count=model.person_count,
             processing_status=FrameProcessingStatus(model.processing_status),
             error_message=model.error_message,
@@ -28,6 +30,8 @@ class SQLAlchemyAnalysisFrameRepository(AnalysisFrameRepository):
             frame_time_sec=domain.frame_time_sec,
             captured_at=domain.captured_at,
             frame_image_path=domain.frame_image_path,
+            frame_width=domain.frame_width,
+            frame_height=domain.frame_height,
             person_count=domain.person_count,
             processing_status=domain.processing_status.value,
             error_message=domain.error_message,
@@ -51,6 +55,8 @@ class SQLAlchemyAnalysisFrameRepository(AnalysisFrameRepository):
                 model.processing_status = frame.processing_status.value
                 model.error_message = frame.error_message
                 model.frame_image_path = frame.frame_image_path
+                model.frame_width = frame.frame_width
+                model.frame_height = frame.frame_height
                 model.captured_at = frame.captured_at
                 model.updated_at = frame.updated_at
                 db_session.commit()

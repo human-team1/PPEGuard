@@ -1,6 +1,11 @@
 from app.domain.entities.analysis_session import AnalysisSession, AnalysisSourceType, AnalysisSessionStatus
 from app.domain.ports.repository import AnalysisSessionRepository
+from app.infrastructure.service_db.models.analysis_frame import AnalysisFrameModel
+from app.infrastructure.service_db.models.analysis_segment_person_result import AnalysisSegmentPersonResultModel
+from app.infrastructure.service_db.models.analysis_segment_summary import AnalysisSegmentSummaryModel
 from app.infrastructure.service_db.models.analysis_session import AnalysisSessionModel
+from app.infrastructure.service_db.models.analysis_track_summary import AnalysisTrackSummaryModel
+from app.infrastructure.service_db.models.detection_result import DetectionResultModel
 from app.infrastructure.service_db.session import SessionLocal
 
 
@@ -22,7 +27,7 @@ class SQLAlchemyAnalysisSessionRepository(AnalysisSessionRepository):
             fail_reason=model.fail_reason,
             video_started_at=model.video_started_at,
             created_at=model.created_at,
-            updated_at=model.updated_at
+            updated_at=model.updated_at,
         )
 
     def _to_model(self, domain: AnalysisSession) -> AnalysisSessionModel:
@@ -42,7 +47,7 @@ class SQLAlchemyAnalysisSessionRepository(AnalysisSessionRepository):
             fail_reason=domain.fail_reason,
             video_started_at=domain.video_started_at,
             created_at=domain.created_at,
-            updated_at=domain.updated_at
+            updated_at=domain.updated_at,
         )
 
     def save(self, session: AnalysisSession):
@@ -60,7 +65,6 @@ class SQLAlchemyAnalysisSessionRepository(AnalysisSessionRepository):
                 .filter_by(session_id=session.session_id)
                 .first()
             )
-
             if model:
                 model.status = session.status.value
                 model.processed_frames = session.processed_frames
@@ -79,6 +83,46 @@ class SQLAlchemyAnalysisSessionRepository(AnalysisSessionRepository):
                 .filter_by(session_id=session_id)
                 .first()
             )
-            if model:
-                return self._to_domain(model)
-            return None
+            return self._to_domain(model) if model else None
+
+    def find_recent(self, limit: int):
+        with SessionLocal() as db_session:
+            models = (
+                db_session.query(AnalysisSessionModel)
+                .order_by(AnalysisSessionModel.created_at.desc())
+                .limit(max(int(limit or 0), 1))
+                .all()
+            )
+            return [self._to_domain(model) for model in models]
+
+    def delete_session_data(self, session_id: str):
+        with SessionLocal() as db_session:
+            model = db_session.query(AnalysisSessionModel).filter_by(session_id=session_id).first()
+            if not model:
+                return
+
+            internal_session_id = model.id
+            segment_summary_subquery = (
+                db_session.query(AnalysisSegmentSummaryModel.id)
+                .filter_by(session_id=internal_session_id)
+            )
+            db_session.query(AnalysisSegmentPersonResultModel).filter(
+                AnalysisSegmentPersonResultModel.segment_summary_id.in_(segment_summary_subquery)
+            ).delete(synchronize_session=False)
+            db_session.query(AnalysisSegmentSummaryModel).filter_by(
+                session_id=internal_session_id
+            ).delete(synchronize_session=False)
+
+            frame_subquery = db_session.query(AnalysisFrameModel.id).filter_by(
+                session_id=internal_session_id
+            )
+            db_session.query(DetectionResultModel).filter(
+                DetectionResultModel.frame_id.in_(frame_subquery)
+            ).delete(synchronize_session=False)
+            db_session.query(AnalysisTrackSummaryModel).filter_by(
+                session_id=internal_session_id
+            ).delete(synchronize_session=False)
+            db_session.query(AnalysisFrameModel).filter_by(
+                session_id=internal_session_id
+            ).delete(synchronize_session=False)
+            db_session.commit()

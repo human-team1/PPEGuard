@@ -38,6 +38,10 @@ class AnalysisSegmentPersonResult:
     helmet_detected_frames: int
     vest_detected_frames: int
     regex_match_count: int
+    bbox_x1: Optional[int] = None
+    bbox_y1: Optional[int] = None
+    bbox_x2: Optional[int] = None
+    bbox_y2: Optional[int] = None
     id: Optional[int] = None
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)

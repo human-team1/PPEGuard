@@ -36,6 +36,7 @@ class ProcessDetectionCommand:
 
 @dataclass
 class AnalysisSessionResponseDto:
+    session_no: Optional[int]
     session_id: str
     source_type: str
     source_name: Optional[str]
@@ -53,12 +54,19 @@ class AnalysisSessionResponseDto:
 
 
 @dataclass
+class AnalysisSessionListResponseDto:
+    sessions: list[AnalysisSessionResponseDto]
+
+
+@dataclass
 class AnalysisFrameItemResponseDto:
     frame_id: int
     frame_no: int
     frame_time_sec: Decimal
     captured_at: Optional[datetime]
     frame_image_path: Optional[str]
+    frame_width: Optional[int]
+    frame_height: Optional[int]
     person_count: int
     processing_status: str
     error_message: Optional[str]
@@ -79,6 +87,7 @@ class DetectionResultItemResponseDto:
     frame_no: Optional[int]
     frame_time_sec: Optional[Decimal]
     person_index: int
+    track_id: Optional[int]
     employee_no: Optional[str]
     ocr_text: Optional[str]
     ocr_confidence: Optional[Decimal]
@@ -105,21 +114,29 @@ class DetectionResultListResponseDto:
 class AnalyzeFrameCommand:
     image_base64: str
     session_id: Optional[str] = None
+    frame_no: Optional[int] = None
 
 
 @dataclass
 class AnalysisSegmentPersonResultResponseDto:
     person_result_id: int
+    local_person_id: int
     track_id: int
     employee_id: Optional[str]
     ocr_number: Optional[str]
     ocr_confirmed: bool
     helmet_status: str
     vest_status: str
+    session_final_helmet_status: Optional[str]
+    session_final_vest_status: Optional[str]
     observed_frames: int
     helmet_detected_frames: int
     vest_detected_frames: int
     regex_match_count: int
+    bbox_x1: Optional[int]
+    bbox_y1: Optional[int]
+    bbox_x2: Optional[int]
+    bbox_y2: Optional[int]
     created_at: datetime
     updated_at: datetime
 
@@ -143,4 +160,32 @@ class AnalysisSegmentSummaryResponseDto:
 class AnalysisSegmentListResponseDto:
     session_id: str
     segments: list[AnalysisSegmentSummaryResponseDto]
+
+
+@dataclass
+class AnalysisTrackSummaryResponseDto:
+    track_summary_id: int
+    track_id: int
+    representative_frame_id: Optional[int]
+    representative_frame_path: Optional[str]
+    employee_no: Optional[str]
+    latest_ocr_text: Optional[str]
+    latest_ocr_confidence: Optional[Decimal]
+    ocr_confirmed: bool
+    overall_ppe_status: str
+    helmet_status: str
+    vest_status: str
+    violation_count: int
+    first_seen_frame_no: Optional[int]
+    last_seen_frame_no: Optional[int]
+    first_seen_at_sec: Optional[Decimal]
+    last_seen_at_sec: Optional[Decimal]
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass
+class AnalysisTrackSummaryListResponseDto:
+    session_id: str
+    tracks: list[AnalysisTrackSummaryResponseDto]
 

@@ -1,24 +1,20 @@
+import logging
 import os
 
 import torch
 from flask import request
-from flask_socketio import emit
 
 from app import socketio
-from config.settings import Config
-from app.application.dtos import AnalyzeFrameCommand
-from app.application.services.analyze_worker_service import AnalyzeWorker
-from app.application.services.video_analysis_ocr_service import VideoAnalysisOcrService
+from app.application.dtos import AnalyzeFrameCommand, StartSessionCommand
 from app.application.usecases.analyze_frame_usecase import AnalyzeFrameUseCase
+from app.domain.entities.analysis_session import AnalysisSourceType
 from app.infrastructure.dependencies import (
-    build_detector,
-    build_ocr_engine,
     build_realtime_event_service,
-    build_segment_result_service,
+    build_start_session_usecase,
+    build_stop_session_usecase,
+    build_webcam_pipeline_manager,
 )
-from app.infrastructure.service_db.repositories.analysis_session_repository import (
-    SQLAlchemyAnalysisSessionRepository,
-)
+from app.presentation.api.schemas.serializers import serialize
 
 torch.set_num_threads(1)
 
@@ -32,87 +28,123 @@ TRACKER_CONFIG = os.path.join(
     "../../../infrastructure/ai_analyzer/configs/bytetrack.yaml",
 )
 
-detector = build_detector(MODEL_PATH, TRACKER_CONFIG)
-worker = AnalyzeWorker(detector)
-ocr_engine = build_ocr_engine()
-ocr_service = VideoAnalysisOcrService(
-    ocr_interval_sec=Config.OCR_INTERVAL_SEC,
-    employee_no_regex=Config.EMPLOYEE_NO_REGEX,
-    employee_no_min_length=Config.EMPLOYEE_NO_MIN_LENGTH,
-    employee_no_max_length=Config.EMPLOYEE_NO_MAX_LENGTH,
-)
-session_repo = SQLAlchemyAnalysisSessionRepository()
 realtime_event_service = build_realtime_event_service()
-segment_result_service = build_segment_result_service(
+webcam_pipeline_manager = build_webcam_pipeline_manager(
+    model_path=MODEL_PATH,
+    tracker_config=TRACKER_CONFIG,
     realtime_event_service=realtime_event_service,
 )
 analyze_frame_usecase = AnalyzeFrameUseCase(
-    worker,
-    session_repo=session_repo,
-    ocr_service=ocr_service,
-    ocr_engine=ocr_engine,
-    segment_result_service=segment_result_service,
+    webcam_pipeline_manager=webcam_pipeline_manager,
     realtime_event_service=realtime_event_service,
 )
+start_session_usecase = build_start_session_usecase()
+stop_session_usecase = build_stop_session_usecase()
 socket_session_map = {}
+logger = logging.getLogger(__name__)
 
 
 @socketio.on("connect")
 def handle_connect():
-    print("[Socket] client connected", flush=True)
+    logger.info("[Socket] client connected sid=%s", request.sid)
 
 
+@socketio.on("start_webcam_analysis")
+def handle_start_webcam_analysis(data):
+    payload = data or {}
+    cmd = StartSessionCommand(
+        source_type=AnalysisSourceType.WEBCAM,
+        frame_interval_sec=int(payload.get("frame_interval_sec", 3)),
+        source_name=payload.get("source_name") or "Webcam-Live",
+        requested_by=payload.get("requested_by") or "socket-client",
+    )
+    session = start_session_usecase.execute(cmd)
+    socket_session_map[request.sid] = session.session_id
+    realtime_event_service.emit_session_status(
+        session_id=session.session_id,
+        source_type="WEBCAM",
+        status="started",
+    )
+    logger.info("[Socket] webcam analysis started sid=%s session_id=%s", request.sid, session.session_id)
+    return serialize(session)
+
+
+@socketio.on("webcam_analysis_frame")
 @socketio.on("frame")
-def handle_frame(data):
+def handle_webcam_analysis_frame(data):
     try:
-        image_data = data.get("image")
+        payload = data or {}
+        image_data = payload.get("image")
         if not image_data:
+            return
+
+        expected_session_id = socket_session_map.get(request.sid)
+        requested_session_id = payload.get("session_id")
+        if not expected_session_id:
+            logger.warning(
+                "[Socket] webcam frame ignored inactive sid=%s session_id=%s frame_no=%s",
+                request.sid,
+                requested_session_id,
+                payload.get("frame_no"),
+            )
+            return
+        if requested_session_id != expected_session_id:
+            logger.warning(
+                "[Socket] webcam frame ignored session mismatch sid=%s expected_session_id=%s session_id=%s frame_no=%s",
+                request.sid,
+                expected_session_id,
+                requested_session_id,
+                payload.get("frame_no"),
+            )
             return
 
         command = AnalyzeFrameCommand(
             image_base64=image_data,
-            session_id=data.get("session_id"),
+            session_id=requested_session_id,
+            frame_no=payload.get("frame_no"),
         )
-        print(
-            f"[Socket] webcam frame received - sid={request.sid}, session_id={command.session_id}",
-            flush=True,
-        )
-        print("[SOCKET] payload decoded", flush=True)
 
         if command.session_id:
             socket_session_map[request.sid] = command.session_id
 
-        print("[SOCKET] analysis started", flush=True)
-        results = analyze_frame_usecase.execute(command)
-        print("[SOCKET] analysis finished", flush=True)
+        analyze_frame_usecase.execute(command)
 
-        serialized_results = []
-        for _, person in results.items():
-            serialized_results.append(
-                {
-                    "id": person.id,
-                    "bbox": person.bbox,
-                    "has_vest": person.has_vest,
-                    "has_helmet": person.has_helmet,
-                    "is_safe": person.is_safe(),
-                    "confidence": float(person.confidence),
-                }
-            )
+    except Exception as exc:
+        logger.exception(
+            "[Socket] frame processing failed sid=%s session_id=%s",
+            request.sid,
+            data.get("session_id") if isinstance(data, dict) else None,
+        )
+        realtime_event_service.emit_error(f"분석 중 오류 발생: {str(exc)}")
 
-        emit("results", {"persons": serialized_results})
 
-    except Exception as e:
-        print(f"[Socket] processing error: {e}", flush=True)
-        emit("error", {"message": f"분석 중 오류 발생: {str(e)}"})
+@socketio.on("stop_webcam_analysis")
+def handle_stop_webcam_analysis(data):
+    payload = data or {}
+    session_id = payload.get("session_id") or socket_session_map.get(request.sid)
+    if not session_id:
+        return {"error": "Session not found"}
+
+    analyze_frame_usecase.finalize_session(session_id, reason="stop")
+    session = stop_session_usecase.execute(session_id)
+    realtime_event_service.emit_session_status(
+        session_id=session_id,
+        source_type="WEBCAM",
+        status="stopped",
+    )
+    socket_session_map.pop(request.sid, None)
+    logger.info("[Socket] webcam analysis stopped sid=%s session_id=%s", request.sid, session_id)
+    return serialize(session)
 
 
 @socketio.on("disconnect")
 def handle_disconnect():
     session_id = socket_session_map.pop(request.sid, None)
     if session_id:
-        print(
-            f"[Socket] disconnect flush triggered - sid={request.sid}, session_id={session_id}",
-            flush=True,
+        logger.info(
+            "[Socket] disconnect finalize sid=%s session_id=%s",
+            request.sid,
+            session_id,
         )
         analyze_frame_usecase.finalize_session(session_id, reason="disconnect")
-    print("[Socket] client disconnected", flush=True)
+    logger.info("[Socket] client disconnected sid=%s", request.sid)

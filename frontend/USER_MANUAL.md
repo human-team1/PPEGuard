@@ -22,7 +22,7 @@
 이 데스크톱 프로그램이 정상 동작하기 위해서는 현재 백엔드 API가 다음과 같은 응답 규약을 제공해 주기를 기대하고 설계되었습니다.
 
 *   `GET /health`: JSON `{"status": "healthy"}`를 타임아웃(3초) 내에 리턴해 주어야 합니다.
-*   `POST /api/v1/sessions`: body에 `source_type`, `source_name`, `frame_interval_sec`를 수신하고, 응답으로 `session_id`와 `status` 필드를 즉시 반환해 주어야 프론트의 분석 대기 UI가 해제됩니다.
+*   `POST /api/v1/sessions`: body에 `source_type`, `source_name`, `frame_interval_sec`를 수신하고, 응답으로 `session_id`와 `status` 필드를 즉시 반환해 주어야 프론트의 분석 대기 UI가 해제됩니다. 단, 비디오 실제 샘플링 간격은 `frame_interval_sec`가 아니라 백엔드 `ANALYSIS_FPS`가 결정하며, `frame_interval_sec`는 호환용 메타데이터로만 유지됩니다.
 *   `GET /api/v1/results`: DTO 호환이 가능하도록 분석 완료 목록을 리스트 배열 형태로 제공해야 하며, 프론트에서 재정렬하지 않으므로 백엔드에서 미리 최신순 정렬된 상태로 응답해 주어야 합니다.
 *   `GET /api/v1/results/{id}`: 특정 결과의 세부 상태 및 `image_path` (현재는 로컬 마운트 절대/상대경로 참조용) 데이터를 반환해야 합니다.
 

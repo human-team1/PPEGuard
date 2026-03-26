@@ -1,32 +1,29 @@
-from PySide6.QtCore import QTimer
+import logging
+
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
-    QComboBox,
+    QAbstractItemView,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
-    QLineEdit,
-    QMenu,
-    QMessageBox,
     QPushButton,
+    QSizePolicy,
+    QSplitter,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from app.config.result_dashboard_config import (
-    NORMAL_INCLUDED_FILTER_OPTIONS,
-    OCR_CONFIRMED_FILTER_OPTIONS,
-    SESSION_TABLE_COLUMNS,
-    VIOLATION_FILTER_OPTIONS,
-)
-from app.models.dashboard_models import SessionDashboardDto
 from app.services.api_client import ApiClient
 from app.services.socket_service import SocketService
 from app.ui.widgets.analysis_live_monitor_widget import AnalysisLiveMonitorWidget
-from app.ui.widgets.dashboard_bar_chart_widget import DashboardBarChartWidget
+from app.ui.widgets.segment_detail_widget import SegmentDetailWidget
+from app.ui.widgets.track_detail_widget import TrackDetailWidget
 from app.utils.async_task import ApiWorker
+
+
+logger = logging.getLogger(__name__)
 
 
 class ResultView(QWidget):
@@ -34,122 +31,118 @@ class ResultView(QWidget):
         super().__init__(parent)
         self.api_client = api_client
         self.settings = settings
+
+        self.session_list_worker = None
+        self.segment_worker = None
         self.list_worker = None
+
         self.pending_reload = False
+        self._is_shutting_down = False
+        self._is_loading_sessions = False
+        self._is_loading_segments = False
+        self._live_events_connected = False
+        self._last_completed_session_id = None
+
+        self.current_input_source = "VIDEO_FILE"
+        self.selected_session_source_type = None
+        self.is_query_panel_active = True
+        self.current_query_kind = "segments"
+
         self.current_session_id = None
-        self.current_dashboard = None
-        self.pending_source_type = None
         self.current_analysis_status = None
         self.has_received_segment_saved = False
-        self.active_inspection_items = (
-            settings.get_selected_inspection_items() if settings else ["helmet", "vest"]
-        )
-        self.visible_column_keys = (
-            settings.get_visible_result_columns()
-            if settings
-            else [item["key"] for item in SESSION_TABLE_COLUMNS if item["default_visible"]]
-        )
+        self.selected_session_payload = None
+        self.loaded_sessions: list[dict] = []
+        self.loaded_segments: list[dict] = []
+        self.loaded_tracks: list[dict] = []
+
         self.socket_service = SocketService(self.api_client.base_url)
         self.segment_sync_timer = QTimer(self)
         self.segment_sync_timer.setInterval(3000)
         self.segment_sync_timer.timeout.connect(self._sync_segments_fallback)
+
         self._init_ui()
         self._connect_live_events()
-        self.set_active_inspection_items(self.active_inspection_items)
-        self._set_dashboard_visible(False)
+        self.set_input_source_type("VIDEO_FILE")
 
     def _init_ui(self):
         root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(10)
 
         title_layout = QHBoxLayout()
-        title = QLabel("세션 결과 화면")
+        title = QLabel("세션 결과 조회")
         title.setStyleSheet("font-size: 16px; font-weight: bold;")
+        self.refresh_btn = QPushButton("목록 새로고침")
+        self.refresh_btn.clicked.connect(self._reload_all)
         title_layout.addWidget(title)
         title_layout.addStretch()
-
-        self.column_menu_button = QToolButton()
-        self.column_menu_button.setText("컬럼 선택")
-        self.column_menu_button.setPopupMode(QToolButton.InstantPopup)
-        self.column_menu_button.setMenu(self._build_column_menu())
-        title_layout.addWidget(self.column_menu_button)
-
-        self.refresh_btn = QPushButton("결과 새로고침")
-        self.refresh_btn.clicked.connect(lambda: self.load_results(reason="manual"))
         title_layout.addWidget(self.refresh_btn)
         root_layout.addLayout(title_layout)
 
-        self.filter_bar = QWidget(self)
-        filter_layout = QHBoxLayout(self.filter_bar)
-        filter_layout.setContentsMargins(0, 0, 0, 0)
+        self.live_container = QWidget(self)
+        live_layout = QVBoxLayout(self.live_container)
+        live_layout.setContentsMargins(0, 0, 0, 0)
+        live_layout.setSpacing(0)
 
-        filter_layout.addWidget(QLabel("위반 유형", self.filter_bar))
-        self.violation_combo = QComboBox(self.filter_bar)
-        for option in VIOLATION_FILTER_OPTIONS:
-            self.violation_combo.addItem(option["label"], option["key"])
-        self.violation_combo.currentIndexChanged.connect(self._apply_cached_dashboard)
-        filter_layout.addWidget(self.violation_combo)
+        self.live_monitor = AnalysisLiveMonitorWidget(self.live_container)
+        self.live_monitor.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        live_layout.addWidget(self.live_monitor)
+        live_layout.addStretch()
+        root_layout.addWidget(self.live_container, stretch=1)
 
-        filter_layout.addWidget(QLabel("직원 ID", self.filter_bar))
-        self.employee_id_input = QLineEdit(self.filter_bar)
-        self.employee_id_input.setPlaceholderText("직원 ID 포함 검색")
-        self.employee_id_input.textChanged.connect(self._apply_cached_dashboard)
-        filter_layout.addWidget(self.employee_id_input)
+        self.query_container = QWidget(self)
+        query_layout = QVBoxLayout(self.query_container)
+        query_layout.setContentsMargins(0, 0, 0, 0)
 
-        filter_layout.addWidget(QLabel("OCR 번호", self.filter_bar))
-        self.ocr_number_input = QLineEdit(self.filter_bar)
-        self.ocr_number_input.setPlaceholderText("OCR 번호 포함 검색")
-        self.ocr_number_input.textChanged.connect(self._apply_cached_dashboard)
-        filter_layout.addWidget(self.ocr_number_input)
+        self.splitter = QSplitter(self.query_container)
+        query_layout.addWidget(self.splitter, stretch=1)
 
-        filter_layout.addWidget(QLabel("OCR 확정", self.filter_bar))
-        self.ocr_confirmed_combo = QComboBox(self.filter_bar)
-        for option in OCR_CONFIRMED_FILTER_OPTIONS:
-            self.ocr_confirmed_combo.addItem(option["label"], option["key"])
-        self.ocr_confirmed_combo.currentIndexChanged.connect(self._apply_cached_dashboard)
-        filter_layout.addWidget(self.ocr_confirmed_combo)
+        session_panel = QWidget(self.query_container)
+        session_layout = QVBoxLayout(session_panel)
+        session_layout.setContentsMargins(0, 0, 0, 0)
+        session_layout.addWidget(QLabel("세션 목록"))
+        self.session_table = QTableWidget(self.query_container)
+        self.session_table.setColumnCount(4)
+        self.session_table.setHorizontalHeaderLabels(["세션 번호", "입력 타입", "상태", "생성 시각"])
+        self.session_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.session_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.session_table.currentCellChanged.connect(self._on_session_cell_changed)
+        session_layout.addWidget(self.session_table)
+        self.splitter.addWidget(session_panel)
 
-        filter_layout.addWidget(QLabel("정상 포함", self.filter_bar))
-        self.normal_included_combo = QComboBox(self.filter_bar)
-        for option in NORMAL_INCLUDED_FILTER_OPTIONS:
-            self.normal_included_combo.addItem(option["label"], option["key"])
-        self.normal_included_combo.currentIndexChanged.connect(self._apply_cached_dashboard)
-        filter_layout.addWidget(self.normal_included_combo)
-        root_layout.addWidget(self.filter_bar)
+        item_panel = QWidget(self.query_container)
+        item_layout = QVBoxLayout(item_panel)
+        item_layout.setContentsMargins(0, 0, 0, 0)
+        self.item_list_label = QLabel("세그먼트 목록")
+        item_layout.addWidget(self.item_list_label)
+        self.segment_table = QTableWidget(self.query_container)
+        self.segment_table.setColumnCount(5)
+        self.segment_table.itemSelectionChanged.connect(self._on_result_item_selected)
+        item_layout.addWidget(self.segment_table)
+        self.splitter.addWidget(item_panel)
 
-        self.live_monitor = AnalysisLiveMonitorWidget(self)
-        root_layout.addWidget(self.live_monitor)
+        self.detail_stack = QStackedWidget(self.query_container)
+        self.segment_detail_widget = SegmentDetailWidget(self.query_container)
+        self.track_detail_widget = TrackDetailWidget(self.query_container)
+        self.detail_stack.addWidget(self.segment_detail_widget)
+        self.detail_stack.addWidget(self.track_detail_widget)
+        self.splitter.addWidget(self.detail_stack)
+        self.splitter.setSizes([260, 360, 520])
 
-        self.empty_label = QLabel(
-            "세션 시작 전입니다. 분석을 시작하면 저장된 세그먼트 결과가 여기에 표시됩니다.",
-            self,
-        )
-        self.empty_label.setStyleSheet("font-size: 13px; color: #666; padding: 16px;")
+        root_layout.addWidget(self.query_container, stretch=1)
+
+        self.empty_label = QLabel("선택된 세션이 없습니다")
+        self.empty_label.setStyleSheet("font-size: 13px; color: #666; padding: 8px;")
         root_layout.addWidget(self.empty_label)
 
-        self.dashboard_container = QWidget(self)
-        dashboard_layout = QVBoxLayout(self.dashboard_container)
-        dashboard_layout.setContentsMargins(0, 0, 0, 0)
-        dashboard_layout.setSpacing(10)
-
-        self.chart_container = QWidget(self.dashboard_container)
-        self.chart_layout = QHBoxLayout(self.chart_container)
-        self.chart_layout.setContentsMargins(0, 0, 0, 0)
-        dashboard_layout.addWidget(self.chart_container)
-
-        self.table = QTableWidget(self.dashboard_container)
-        self.table.setColumnCount(len(SESSION_TABLE_COLUMNS))
-        self.table.setHorizontalHeaderLabels(
-            [column["label"] for column in SESSION_TABLE_COLUMNS]
-        )
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.setAlternatingRowColors(True)
-        dashboard_layout.addWidget(self.table, stretch=1)
-
-        root_layout.addWidget(self.dashboard_container, stretch=1)
-        self._apply_column_visibility()
+        self._configure_query_mode("segments")
 
     def _connect_live_events(self):
+        if self._live_events_connected:
+            logger.warning("[ResultView] live events already connected")
+            return
+
         self.socket_service.analysis_session_status_changed.connect(
             self._on_analysis_session_status
         )
@@ -157,271 +150,377 @@ class ResultView(QWidget):
             self.live_monitor.handle_progress
         )
         self.socket_service.analysis_frame_result_ready.connect(
-            self.live_monitor.handle_frame_result
+            self._on_analysis_frame_result
+        )
+        self.socket_service.analysis_track_confirmed_ready.connect(
+            self._on_analysis_track_confirmed
         )
         self.socket_service.analysis_segment_saved.connect(
             self._on_analysis_segment_saved
         )
         self.socket_service.error_occurred.connect(self._on_live_socket_error)
+        self.live_monitor.analysis_sample_ready.connect(
+            self.socket_service.send_analysis_sample
+        )
+        self._live_events_connected = True
+        logger.info("[ResultView] live events connected once")
 
     def ensure_live_connection(self):
         self.socket_service.server_url = self.api_client.base_url
         return self.socket_service.ensure_connected()
 
+    def set_input_source_type(self, source_type: str):
+        self.current_input_source = source_type
+        self.live_monitor.current_source_type = source_type
+        self.is_query_panel_active = source_type != "WEBCAM"
+        self._update_display_mode()
+
     def prepare_live_session(self, source_type: str):
-        self.pending_source_type = source_type
+        self.current_input_source = source_type
         self.current_session_id = None
-        self.current_dashboard = None
-        self.pending_reload = False
         self.current_analysis_status = None
         self.has_received_segment_saved = False
+        self._last_completed_session_id = None
+        self.selected_session_source_type = None
+        self.selected_session_payload = None
+        self.loaded_segments = []
+        self.loaded_tracks = []
         self.segment_sync_timer.stop()
         self.live_monitor.prepare_session(source_type)
-        self._set_dashboard_visible(False)
-        self.empty_label.setVisible(True)
-        self.empty_label.setText(
-            "세션이 아직 시작되지 않았습니다. 세그먼트가 저장되면 결과가 자동으로 표시됩니다."
-        )
+        self.segment_detail_widget.clear_detail()
+        self.track_detail_widget.clear_detail()
+        self.is_query_panel_active = source_type != "WEBCAM"
+        self._update_display_mode()
+        if self.is_query_panel_active:
+            self.load_sessions()
 
     def set_session_id(self, session_id: str):
         self.current_session_id = session_id
         self.live_monitor.set_session_id(session_id)
+        self._select_session_row(session_id)
 
     def set_active_inspection_items(self, item_keys: list[str]):
-        self.active_inspection_items = list(item_keys)
         self.live_monitor.set_active_items(item_keys)
-        self._apply_column_visibility()
-        if self.current_dashboard is not None:
-            self._apply_cached_dashboard()
+
+    def begin_shutdown(self):
+        self._is_shutting_down = True
+        self.pending_reload = False
+        self.segment_sync_timer.stop()
+        self.live_monitor.stop_local_camera()
+        self._cleanup_workers()
+
+    def load_sessions(self):
+        if self._is_shutting_down or self._is_loading_sessions:
+            return
+        if self.session_list_worker and self.session_list_worker.isRunning():
+            return
+
+        self._is_loading_sessions = True
+        worker = ApiWorker(self.api_client.get_sessions, 20)
+        self.session_list_worker = worker
+        worker.result_ready.connect(self._on_sessions_loaded)
+        worker.error_occurred.connect(self._on_sessions_error)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(self._clear_session_list_worker)
+        worker.start()
 
     def load_results(self, reason: str = "manual"):
-        if self.list_worker and self.list_worker.isRunning():
+        if self._is_shutting_down or self._is_loading_segments:
+            return
+        if self.segment_worker and self.segment_worker.isRunning():
             self.pending_reload = True
             return
         if not self.current_session_id:
-            self._set_dashboard_visible(False)
-            self.empty_label.setVisible(True)
-            self.empty_label.setText("현재 선택된 세션이 없습니다.")
+            self.empty_label.setText("선택된 세션이 없습니다")
             return
 
-        self.pending_reload = False
-        self.refresh_btn.setEnabled(False)
-        self.refresh_btn.setText("불러오는 중...")
-        timeout_sec = 15 if self._is_processing_video_session() else 5
-        print(
-            "[ResultView] load_results called - "
-            f"reason={reason}, session_id={self.current_session_id}, "
-            f"status={self.current_analysis_status}, timeout={timeout_sec}s",
-            flush=True,
-        )
-        self.list_worker = ApiWorker(
-            self.api_client.get_session_segments,
-            session_id=self.current_session_id,
-            timeout_sec=timeout_sec,
-        )
-        self.list_worker.result_ready.connect(self._on_dashboard_loaded)
-        self.list_worker.error_occurred.connect(self._on_dashboard_error)
-        self.list_worker.finished.connect(self._clear_list_worker)
-        self.list_worker.start()
-
-    def _on_dashboard_loaded(self, raw_data: dict):
-        self.refresh_btn.setEnabled(True)
-        self.refresh_btn.setText("결과 새로고침")
-        print(
-            "[ResultView] segments loaded - "
-            f"session_id={raw_data.get('session_id')}, "
-            f"segments={len(raw_data.get('segments', []))}",
-            flush=True,
-        )
-        self.live_monitor.sync_from_segments_response(raw_data)
-        self.current_dashboard = SessionDashboardDto.from_segments_api(
-            raw_data,
-            active_items=self.active_inspection_items,
-        )
-        self._apply_cached_dashboard()
-
-    def _on_dashboard_error(self, err_msg: str):
-        self.refresh_btn.setEnabled(True)
-        self.refresh_btn.setText("결과 새로고침")
-        if self._should_suppress_results_error(err_msg):
-            print(
-                "[ResultView] load_results timeout suppressed - "
-                f"session_id={self.current_session_id}, status={self.current_analysis_status}",
-                flush=True,
+        self._is_loading_segments = True
+        if self.selected_session_source_type == "WEBCAM":
+            worker = ApiWorker(self.api_client.get_session_tracks, self.current_session_id, 5)
+            worker.result_ready.connect(self._on_tracks_loaded)
+            worker.error_occurred.connect(self._on_tracks_error)
+            self.current_query_kind = "tracks"
+        else:
+            timeout_sec = 15 if self._is_processing_video_session() else 5
+            worker = ApiWorker(
+                self.api_client.get_session_segments,
+                self.current_session_id,
+                timeout_sec,
             )
-            if self.current_dashboard is None:
-                self._set_dashboard_visible(False)
-                self.empty_label.setVisible(True)
-            self.empty_label.setText("결과 준비 중입니다. 자동 재시도 중입니다.")
-            return
-        QMessageBox.warning(self, "세션 결과 조회 오류", err_msg)
+            worker.result_ready.connect(self._on_segments_loaded)
+            worker.error_occurred.connect(self._on_segments_error)
+            self.current_query_kind = "segments"
 
-    def _apply_cached_dashboard(self):
-        if self.current_dashboard is None:
-            self._set_dashboard_visible(False)
-            return
-
-        dashboard = SessionDashboardDto.from_segments_api(
-            {
-                "session_id": self.current_dashboard.session_id,
-                "segments": self.current_dashboard.source_segments,
-            },
-            filters=self._collect_filters(),
-            active_items=self.active_inspection_items,
+        self.segment_worker = worker
+        self.list_worker = worker
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(self._clear_segment_worker)
+        worker.start()
+        logger.debug(
+            "[ResultView] load_results reason=%s session_id=%s query_kind=%s",
+            reason,
+            self.current_session_id,
+            self.current_query_kind,
         )
-        self._render_dashboard(dashboard)
 
-    def _render_dashboard(self, dashboard: SessionDashboardDto):
-        has_rows = bool(dashboard.rows)
-        self._set_dashboard_visible(has_rows)
-        self.empty_label.setVisible(not has_rows)
-        if not has_rows:
-            self.empty_label.setText(
-                "저장된 세그먼트 결과가 아직 없거나 필터 조건에 맞는 결과가 없습니다."
+    def _reload_all(self):
+        self.is_query_panel_active = True
+        self._update_display_mode()
+        self.load_sessions()
+        if self.current_session_id:
+            self.load_results(reason="manual_refresh")
+
+    def _on_sessions_loaded(self, payload: dict):
+        self.loaded_sessions = payload.get("sessions", [])
+        self._fill_session_table()
+        if self.current_session_id:
+            self._select_session_row(self.current_session_id)
+
+    def _on_sessions_error(self, err_msg: str):
+        self.empty_label.setText(f"세션 목록 조회 실패: {err_msg}")
+
+    def _fill_session_table(self):
+        self.session_table.setRowCount(len(self.loaded_sessions))
+        for row_index, session in enumerate(self.loaded_sessions):
+            display_session_no = session.get("session_no") or row_index + 1
+            values = [
+                str(display_session_no),
+                session.get("source_type", "-"),
+                session.get("status", "-"),
+                str(session.get("created_at") or "-"),
+            ]
+            for col_index, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                if col_index == 0:
+                    item.setData(Qt.UserRole, session.get("session_id"))
+                self.session_table.setItem(row_index, col_index, item)
+
+    def _on_session_cell_changed(self, current_row: int, _current_column: int, _previous_row: int, _previous_column: int):
+        if current_row < 0:
+            return
+
+        self._activate_session_row(current_row)
+
+    def _activate_session_row(self, row_index: int):
+        session_item = self.session_table.item(row_index, 0)
+        if session_item is None:
+            return
+        session_id = session_item.data(Qt.UserRole) or session_item.text()
+        if not session_id:
+            return
+        if self.current_session_id == session_id and self.selected_session_payload is not None:
+            return
+
+        self.current_session_id = session_id
+        self.live_monitor.set_session_id(session_id)
+        self.selected_session_payload = next(
+            (session for session in self.loaded_sessions if session.get("session_id") == session_id),
+            None,
+        )
+        self.selected_session_source_type = (
+            self.selected_session_payload.get("source_type")
+            if self.selected_session_payload
+            else None
+        )
+        self.is_query_panel_active = True
+        self._configure_query_mode("tracks" if self.selected_session_source_type == "WEBCAM" else "segments")
+        self.loaded_segments = []
+        self.loaded_tracks = []
+        self.segment_table.setRowCount(0)
+        self.segment_detail_widget.clear_detail()
+        self.track_detail_widget.clear_detail()
+        self._update_display_mode()
+        display_session_no = (
+            self.selected_session_payload.get("session_no")
+            if self.selected_session_payload
+            else session_item.text()
+        )
+        self.empty_label.setText(f"선택된 세션: {display_session_no}")
+        self.load_results(reason="session_selected")
+
+    def _on_segments_loaded(self, payload: dict):
+        self.loaded_segments = payload.get("segments", [])
+        self.loaded_tracks = []
+        self.current_query_kind = "segments"
+        self._configure_query_mode("segments")
+        self._fill_segment_table()
+        self._select_first_result_if_needed()
+        self.load_sessions()
+
+    def _on_tracks_loaded(self, payload: dict):
+        self.loaded_tracks = payload.get("tracks", [])
+        self.loaded_segments = []
+        self.current_query_kind = "tracks"
+        self._configure_query_mode("tracks")
+        self._fill_track_table()
+        self._select_first_result_if_needed()
+        self.load_sessions()
+
+    def _on_segments_error(self, err_msg: str):
+        self.empty_label.setText(f"세그먼트 조회 실패: {err_msg}")
+        self.segment_detail_widget.clear_detail("세그먼트 정보를 불러오지 못했습니다")
+
+    def _on_tracks_error(self, err_msg: str):
+        self.empty_label.setText(f"추적 결과 조회 실패: {err_msg}")
+        self.track_detail_widget.clear_detail("추적 결과를 불러오지 못했습니다")
+
+    def _fill_segment_table(self):
+        self.segment_table.setRowCount(len(self.loaded_segments))
+        for row_index, segment in enumerate(self.loaded_segments):
+            confirmed_violation_count = sum(
+                1
+                for person in segment.get("people", [])
+                if self._is_confirmed_violation_person(person)
             )
+            values = [
+                str(segment.get("segment_index", "-")),
+                f"{segment.get('segment_start_sec', 0)}s ~ {segment.get('segment_end_sec', 0)}s",
+                str(segment.get("reference_time") or segment.get("created_at") or "-"),
+                str(confirmed_violation_count),
+                "Y" if confirmed_violation_count > 0 else "N",
+            ]
+            for col_index, value in enumerate(values):
+                self.segment_table.setItem(row_index, col_index, QTableWidgetItem(value))
 
-        self._render_charts(dashboard)
-        self._fill_table(dashboard)
+        if not self.loaded_segments:
+            self.segment_detail_widget.clear_detail("선택된 세그먼트가 없습니다")
 
-    def _render_charts(self, dashboard: SessionDashboardDto):
-        self._clear_layout(self.chart_layout)
+    def _fill_track_table(self):
+        self.segment_table.setRowCount(len(self.loaded_tracks))
+        for row_index, track in enumerate(self.loaded_tracks):
+            values = [
+                str(track.get("track_id", "-")),
+                str(track.get("employee_no") or "-"),
+                "Y" if track.get("ocr_confirmed") else "N",
+                self._map_item_status(track.get("helmet_status")),
+                self._map_item_status(track.get("vest_status")),
+                self._map_track_status(track.get("overall_ppe_status")),
+                str(track.get("violation_count") or 0),
+                "Y" if track.get("representative_frame_path") else "N",
+            ]
+            for col_index, value in enumerate(values):
+                self.segment_table.setItem(row_index, col_index, QTableWidgetItem(value))
 
-        segment_chart = DashboardBarChartWidget(
-            "세그먼트별 위반 수",
-            parent=self.chart_container,
+        if not self.loaded_tracks:
+            self.track_detail_widget.clear_detail("선택된 추적 결과가 없습니다")
+
+    @staticmethod
+    def _is_confirmed_violation_person(person: dict) -> bool:
+        helmet_status = person.get("helmet_status") or "UNKNOWN"
+        vest_status = person.get("vest_status") or "UNKNOWN"
+        return bool(person.get("ocr_confirmed")) and (
+            helmet_status == "NOT_WORN" or vest_status == "NOT_WORN"
         )
-        segment_chart.set_series(dashboard.segment_violation_counts)
-        self.chart_layout.addWidget(segment_chart)
 
-        status_chart = DashboardBarChartWidget(
-            "상태별 비율",
-            parent=self.chart_container,
-        )
-        status_chart.set_series(dashboard.status_ratio)
-        self.chart_layout.addWidget(status_chart)
-
-    def _fill_table(self, dashboard: SessionDashboardDto):
-        self.table.setRowCount(len(dashboard.rows))
-        for row_index, row in enumerate(dashboard.rows):
-            row_map = {
-                "segment_label": row.segment_label,
-                "reference_time": row.reference_time,
-                "employee_id": row.employee_id,
-                "ocr_number": row.ocr_number,
-                "ocr_confirmed": row.ocr_confirmed,
-                "helmet_status": row.helmet_status,
-                "vest_status": row.vest_status,
-                "overall_ppe_status": row.overall_ppe_status,
-                "violation_type": row.violation_type,
-            }
-            for col_index, column in enumerate(SESSION_TABLE_COLUMNS):
-                self.table.setItem(
-                    row_index,
-                    col_index,
-                    QTableWidgetItem(row_map.get(column["key"], "")),
-                )
-        self._apply_column_visibility()
-
-    def _collect_filters(self):
-        return {
-            "violation_type": self.violation_combo.currentData(),
-            "employee_id": self.employee_id_input.text(),
-            "ocr_number": self.ocr_number_input.text(),
-            "ocr_confirmed": self.ocr_confirmed_combo.currentData(),
-            "normal_included": self.normal_included_combo.currentData(),
+    @staticmethod
+    def _map_track_status(value: str | None) -> str:
+        mapping = {
+            "COMPLIANT": "정상",
+            "NON_COMPLIANT": "위반",
+            "UNKNOWN": "미확인",
         }
+        return mapping.get(str(value or "").upper(), "-")
 
-    def _build_column_menu(self):
-        menu = QMenu(self)
-        for column in SESSION_TABLE_COLUMNS:
-            action = menu.addAction(column["label"])
-            action.setCheckable(True)
-            action.setChecked(column["key"] in self.visible_column_keys)
-            action.toggled.connect(
-                lambda checked, key=column["key"]: self._toggle_column_visibility(key, checked)
+    @staticmethod
+    def _map_item_status(value: str | None) -> str:
+        mapping = {
+            "WORN": "착용",
+            "WEARING": "착용",
+            "NOT_WORN": "미착용",
+            "NOT_WEARING": "미착용",
+            "UNKNOWN": "확인불가",
+        }
+        return mapping.get(str(value or "").upper(), "-")
+
+    def _select_first_result_if_needed(self):
+        loaded_count = len(self.loaded_tracks) if self.current_query_kind == "tracks" else len(self.loaded_segments)
+        if not loaded_count:
+            self.empty_label.setText("조회 결과가 없습니다")
+            return
+        if self.segment_table.currentRow() < 0:
+            self.segment_table.selectRow(0)
+            self.segment_table.setCurrentCell(0, 0)
+        if self.current_query_kind == "tracks":
+            self.empty_label.setText(
+                f"추적 결과 {len(self.loaded_tracks)}건 / 세션 {self.current_session_id}"
             )
-        return menu
+        else:
+            self.empty_label.setText(
+                f"세그먼트 {len(self.loaded_segments)}건 / 세션 {self.current_session_id}"
+            )
 
-    def _toggle_column_visibility(self, key: str, checked: bool):
-        if checked and key not in self.visible_column_keys:
-            self.visible_column_keys.append(key)
-        if not checked and key in self.visible_column_keys:
-            self.visible_column_keys.remove(key)
-        if self.settings:
-            self.settings.save_visible_result_columns(self.visible_column_keys)
-        self._apply_column_visibility()
+    def _on_result_item_selected(self):
+        row = self.segment_table.currentRow()
+        if self.current_query_kind == "tracks":
+            if row < 0 or row >= len(self.loaded_tracks):
+                self.track_detail_widget.clear_detail()
+                return
+            self.track_detail_widget.set_track_detail(self.loaded_tracks[row])
+            return
 
-    def _apply_column_visibility(self):
-        active_set = set(self.active_inspection_items)
-        for col_index, column in enumerate(SESSION_TABLE_COLUMNS):
-            hidden = column["key"] not in self.visible_column_keys
-            if column["key"] == "helmet_status" and "helmet" not in active_set:
-                hidden = True
-            if column["key"] == "vest_status" and "vest" not in active_set:
-                hidden = True
-            self.table.setColumnHidden(col_index, hidden)
-
-    def _set_dashboard_visible(self, visible: bool):
-        self.filter_bar.setVisible(visible)
-        self.dashboard_container.setVisible(visible)
-
-    def _clear_layout(self, layout):
-        while layout.count():
-            item = layout.takeAt(0)
-            widget = item.widget()
-            child_layout = item.layout()
-            if widget is not None:
-                widget.deleteLater()
-            elif child_layout is not None:
-                self._clear_layout(child_layout)
+        if row < 0 or row >= len(self.loaded_segments):
+            self.segment_detail_widget.clear_detail()
+            return
+        self.segment_detail_widget.set_segment_detail(self.loaded_segments[row])
 
     def _sync_segments_fallback(self):
         if not self.has_received_segment_saved:
-            print(
-                "[ResultView] fallback sync skipped - waiting first segment",
-                flush=True,
-            )
             return
-        if self.current_session_id and not (self.list_worker and self.list_worker.isRunning()):
-            print(
-                f"[ResultView] fallback sync triggered - session_id={self.current_session_id}",
-                flush=True,
-            )
+        if self.current_session_id and not (self.segment_worker and self.segment_worker.isRunning()):
             self.load_results(reason="fallback")
 
     def _on_analysis_session_status(self, payload: dict):
         source_type = payload.get("source_type")
         session_id = payload.get("session_id")
-
-        print(
-            "[ResultView] analysis_session_status received - "
-            f"source_type={source_type}, session_id={session_id}, status={payload.get('status')}",
-            flush=True,
-        )
         self.live_monitor.handle_session_status(payload)
-        if not self.current_session_id and self.pending_source_type == source_type:
+
+        if not self.is_query_panel_active:
+            self.current_input_source = source_type or self.current_input_source
+            self._update_display_mode()
+
+        if (
+            not self.current_session_id
+            and not self.is_query_panel_active
+            and self.current_input_source == source_type
+        ):
             self.set_session_id(session_id)
 
         status = payload.get("status")
         self.current_analysis_status = status
+        if status == "completed" and self._last_completed_session_id == session_id:
+            logger.info("[ResultView] duplicate completed ignored session_id=%s", session_id)
+            return
+
+        if (
+            not self.is_query_panel_active
+            and self.current_input_source == "WEBCAM"
+            and status in {"started", "processing"}
+        ):
+            return
+
         if status in {"started", "processing"} and self.current_session_id == session_id:
             if self.has_received_segment_saved and not self.segment_sync_timer.isActive():
                 self.segment_sync_timer.start()
         if status in {"completed", "failed", "stopping"}:
             self.segment_sync_timer.stop()
         if status in {"completed", "failed"} and self.current_session_id == session_id:
-            self.load_results(reason=f"session_status:{status}")
+            if status == "completed":
+                self._last_completed_session_id = session_id
+            if self.current_input_source == "VIDEO_FILE" or self.is_query_panel_active:
+                self.load_results(reason=f"session_status:{status}")
+            else:
+                self.load_sessions()
 
     def _on_analysis_segment_saved(self, payload: dict):
-        print(
-            "[ResultView] analysis_segment_saved forwarded - "
-            f"session_id={payload.get('session_id')}, "
-            f"segment_index={payload.get('segment_index')}",
-            flush=True,
-        )
+        if self.current_input_source == "WEBCAM" and not self.is_query_panel_active:
+            return
+
         self.live_monitor.handle_segment_saved(payload)
-        if payload.get("session_id") == self.current_session_id:
-            self.has_received_segment_saved = True
+        if payload.get("session_id") != self.current_session_id:
+            return
+
+        self.has_received_segment_saved = True
+        if self.is_query_panel_active:
             if (
                 self.current_analysis_status in {"started", "processing"}
                 and not self.segment_sync_timer.isActive()
@@ -429,29 +528,116 @@ class ResultView(QWidget):
                 self.segment_sync_timer.start()
             self.load_results(reason="segment_saved")
 
+    def _on_analysis_frame_result(self, payload: dict):
+        logger.info(
+            "[ResultView] analysis_frame_result received session_id=%s frame_no=%s payload_keys=%s tracks_count=%s detections_count=%s",
+            payload.get("session_id"),
+            payload.get("frame_no"),
+            sorted(list(payload.keys())),
+            payload.get("tracks_count", 0),
+            len(payload.get("detections", [])),
+        )
+        self.live_monitor.handle_frame_result(payload)
+        logger.info(
+            "[ResultView] analysis_frame_result forwarded session_id=%s frame_no=%s target=%s",
+            payload.get("session_id"),
+            payload.get("frame_no"),
+            "AnalysisLiveMonitorWidget.handle_frame_result",
+        )
+
+    def _on_analysis_track_confirmed(self, payload: dict):
+        self.live_monitor.handle_track_confirmed(payload)
+
     def _on_live_socket_error(self, err_msg: str):
         self.live_monitor.handle_session_status(
             {
                 "session_id": self.current_session_id,
-                "source_type": self.pending_source_type,
+                "source_type": self.current_input_source,
                 "status": "failed",
             }
         )
         self.segment_sync_timer.stop()
         self.live_monitor._append_event(f"소켓 오류: {err_msg}")
 
-    def _clear_list_worker(self):
+    def _clear_session_list_worker(self):
+        self._is_loading_sessions = False
+        self.session_list_worker = None
+
+    def _clear_segment_worker(self):
+        self._is_loading_segments = False
+        self.segment_worker = None
         self.list_worker = None
-        if self.pending_reload:
+        if self.pending_reload and not self._is_shutting_down:
             self.pending_reload = False
             self.load_results(reason="pending_reload")
+            return
+        self.pending_reload = False
+
+    def _select_session_row(self, session_id: str):
+        for row_index in range(self.session_table.rowCount()):
+            item = self.session_table.item(row_index, 0)
+            if item and (item.data(Qt.UserRole) == session_id or item.text() == session_id):
+                self.session_table.selectRow(row_index)
+                self.session_table.setCurrentCell(row_index, 0)
+                return
 
     def _is_processing_video_session(self) -> bool:
         return (
-            self.pending_source_type == "VIDEO_FILE"
+            self.current_input_source == "VIDEO_FILE"
             and self.current_analysis_status in {"started", "processing"}
         )
 
-    def _should_suppress_results_error(self, err_msg: str) -> bool:
-        is_timeout = "응답 시간 초과" in err_msg or "timeout" in err_msg.lower()
-        return is_timeout and self._is_processing_video_session()
+    def _is_live_analysis_mode(self) -> bool:
+        return self.current_input_source == "WEBCAM" and not self.is_query_panel_active
+
+    def _update_display_mode(self):
+        is_live_mode = self._is_live_analysis_mode()
+        self.live_container.setVisible(is_live_mode)
+        self.query_container.setVisible(not is_live_mode)
+
+        if is_live_mode:
+            self.live_monitor.start_local_camera()
+            self.empty_label.setText("웹캠 실시간 분석 화면입니다")
+            self.empty_label.setVisible(False)
+            self.live_monitor.current_source_type = "WEBCAM"
+            self.live_monitor.update_live_ui_visibility(
+                "WEBCAM",
+                self.current_analysis_status,
+            )
+        else:
+            self.live_monitor.stop_local_camera()
+            self.empty_label.setVisible(True)
+            self.live_monitor.update_live_ui_visibility(
+                self.current_input_source,
+                self.current_analysis_status,
+            )
+            self.load_sessions()
+
+    def _configure_query_mode(self, mode: str):
+        self.current_query_kind = mode
+        if mode == "tracks":
+            self.item_list_label.setText("추적 결과 목록")
+            self.segment_table.setColumnCount(8)
+            self.segment_table.setHorizontalHeaderLabels(
+                ["Track ID", "직원번호", "OCR 확정", "헬멧 상태", "조끼 상태", "최종 상태", "위반 횟수", "대표 프레임"]
+            )
+            self.detail_stack.setCurrentWidget(self.track_detail_widget)
+        else:
+            self.item_list_label.setText("세그먼트 목록")
+            self.segment_table.setColumnCount(5)
+            self.segment_table.setHorizontalHeaderLabels(
+                ["세그먼트", "시간", "기준 시각", "OCR 확정 위반 인원", "위반 여부"]
+            )
+            self.detail_stack.setCurrentWidget(self.segment_detail_widget)
+
+    def _cleanup_workers(self):
+        for worker_attr in ("session_list_worker", "segment_worker"):
+            worker = getattr(self, worker_attr, None)
+            if worker and worker.isRunning():
+                worker.requestInterruption()
+                worker.quit()
+                worker.wait(3000)
+
+    def closeEvent(self, event):
+        self.begin_shutdown()
+        super().closeEvent(event)

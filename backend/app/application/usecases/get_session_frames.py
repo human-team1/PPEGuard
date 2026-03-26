@@ -27,6 +27,8 @@ class GetSessionFramesUseCase:
                     frame_time_sec=frame.frame_time_sec,
                     captured_at=frame.captured_at,
                     frame_image_path=frame.frame_image_path,
+                    frame_width=frame.frame_width,
+                    frame_height=frame.frame_height,
                     person_count=frame.person_count,
                     processing_status=(
                         frame.processing_status.value

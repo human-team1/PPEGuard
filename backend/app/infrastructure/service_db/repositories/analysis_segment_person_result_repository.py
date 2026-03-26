@@ -23,6 +23,10 @@ class SQLAlchemyAnalysisSegmentPersonResultRepository(
             helmet_detected_frames=model.helmet_detected_frames,
             vest_detected_frames=model.vest_detected_frames,
             regex_match_count=model.regex_match_count,
+            bbox_x1=model.bbox_x1,
+            bbox_y1=model.bbox_y1,
+            bbox_x2=model.bbox_x2,
+            bbox_y2=model.bbox_y2,
             created_at=model.created_at,
             updated_at=model.updated_at,
         )
@@ -47,6 +51,10 @@ class SQLAlchemyAnalysisSegmentPersonResultRepository(
                     helmet_detected_frames=result.helmet_detected_frames,
                     vest_detected_frames=result.vest_detected_frames,
                     regex_match_count=result.regex_match_count,
+                    bbox_x1=result.bbox_x1,
+                    bbox_y1=result.bbox_y1,
+                    bbox_x2=result.bbox_x2,
+                    bbox_y2=result.bbox_y2,
                     created_at=result.created_at,
                     updated_at=result.updated_at,
                 )

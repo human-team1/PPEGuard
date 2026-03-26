@@ -1,6 +1,11 @@
+import logging
 from datetime import timedelta
 
+from app.domain.entities.analysis_session import AnalysisSourceType
 from app.domain.entities.analysis_segment import AnalysisSegmentPersonResult, AnalysisSegmentSummary
+
+
+logger = logging.getLogger(__name__)
 
 
 class SegmentPersistenceService:
@@ -16,6 +21,7 @@ class SegmentPersistenceService:
         segment_start_sec: float,
         segment_end_sec: float,
         representative_frame_path: str | None,
+        representative_frame_info: dict | None,
         people_results: list[dict],
     ):
         if not people_results and not representative_frame_path:
@@ -36,11 +42,13 @@ class SegmentPersistenceService:
             reference_time=reference_time,
         )
         self.segment_summary_repo.save(summary)
-        print(
-            f"[Segment] segment summary saved - session_id={session.session_id}, "
-            f"segment_id={summary.id}, segment_index={segment_index}, "
-            f"person_count={summary.person_count}, confirmed_count={summary.confirmed_person_count}",
-            flush=True,
+        logger.info(
+            "[DB] segment summary saved session_id=%s segment_id=%s segment_index=%s person_count=%s confirmed_count=%s",
+            session.session_id,
+            summary.id,
+            segment_index,
+            summary.person_count,
+            summary.confirmed_person_count,
         )
 
         person_results = [
@@ -56,22 +64,28 @@ class SegmentPersistenceService:
                 helmet_detected_frames=person["helmet_detected_frames"],
                 vest_detected_frames=person["vest_detected_frames"],
                 regex_match_count=person["regex_match_count"],
+                bbox_x1=(person.get("bbox") or {}).get("x1"),
+                bbox_y1=(person.get("bbox") or {}).get("y1"),
+                bbox_x2=(person.get("bbox") or {}).get("x2"),
+                bbox_y2=(person.get("bbox") or {}).get("y2"),
             )
             for person in people_results
         ]
         self.segment_person_result_repo.save_many(person_results)
-        print(
-            f"[Segment] segment person results saved - session_id={session.session_id}, "
-            f"segment_id={summary.id}, count={len(person_results)}",
-            flush=True,
+        logger.info(
+            "[DB] segment person results saved session_id=%s segment_id=%s count=%s",
+            session.session_id,
+            summary.id,
+            len(person_results),
         )
-        if self.realtime_event_service:
+        if self.realtime_event_service and session.source_type == AnalysisSourceType.WEBCAM:
             self.realtime_event_service.emit_segment_saved(
                 session_id=session.session_id,
                 segment_index=segment_index,
                 segment_start_sec=segment_start_sec,
                 segment_end_sec=segment_end_sec,
                 best_frame_path=representative_frame_path,
+                representative_frame=representative_frame_info,
                 detected_person_count=summary.person_count,
                 confirmed_ocr_person_count=summary.confirmed_person_count,
                 person_results=people_results,

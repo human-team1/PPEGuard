@@ -2,22 +2,62 @@ import re
 
 
 class VideoAnalysisOcrService:
+    SUPPORTED_INSPECTION_KEYS = {"helmet", "vest"}
+
     def __init__(
         self,
         ocr_interval_sec: float,
         employee_no_regex: str,
+        employee_number_min_confirm_count: int,
         employee_no_min_length: int,
         employee_no_max_length: int,
     ):
         self.ocr_interval_sec = ocr_interval_sec
         self.employee_no_regex = employee_no_regex
+        self.employee_number_min_confirm_count = max(int(employee_number_min_confirm_count or 0), 1)
         self.employee_no_min_length = employee_no_min_length
         self.employee_no_max_length = employee_no_max_length
 
     def is_person_identified(self, person) -> bool:
         return bool(getattr(person, "ocr_confirmed", False) and getattr(person, "employee_no", None))
 
-    def should_run_ocr_for_person(self, person, current_time_sec: float) -> bool:
+    def normalize_inspection_item_keys(self, inspection_item_keys: list[str] | None) -> set[str]:
+        keys = {
+            str(item).strip().lower()
+            for item in (inspection_item_keys or [])
+            if str(item).strip()
+        }
+        active_keys = keys & self.SUPPORTED_INSPECTION_KEYS
+        return active_keys or set(self.SUPPORTED_INSPECTION_KEYS)
+
+    def get_selected_item_violation_flags(
+        self,
+        person,
+        inspection_item_keys: list[str] | None,
+    ) -> dict[str, bool]:
+        active_keys = self.normalize_inspection_item_keys(inspection_item_keys)
+        flags: dict[str, bool] = {}
+        if "helmet" in active_keys:
+            flags["helmet"] = not bool(getattr(person, "has_helmet", False))
+        if "vest" in active_keys:
+            flags["vest"] = not bool(getattr(person, "has_vest", False))
+        return flags
+
+    def has_selected_item_violation(
+        self,
+        person,
+        inspection_item_keys: list[str] | None,
+    ) -> bool:
+        return any(self.get_selected_item_violation_flags(person, inspection_item_keys).values())
+
+    def should_run_ocr_for_person(
+        self,
+        person,
+        current_time_sec: float,
+        inspection_item_keys: list[str] | None,
+        ocr_attempt_count: int = 0,
+        max_attempt_count: int | None = None,
+    ) -> bool:
         if self.is_person_identified(person):
             return False
 
@@ -25,6 +65,12 @@ class VideoAnalysisOcrService:
             return False
 
         if getattr(person.crop_image, "size", 0) == 0:
+            return False
+
+        if not self.has_selected_item_violation(person, inspection_item_keys):
+            return False
+
+        if max_attempt_count is not None and ocr_attempt_count >= max(int(max_attempt_count), 1):
             return False
 
         last_ocr_at_sec = getattr(person, "last_ocr_at_sec", None)
@@ -58,35 +104,8 @@ class VideoAnalysisOcrService:
         person.latest_ocr_regex_matched = True
         person.ocr_candidate_counts[candidate] = person.ocr_candidate_counts.get(candidate, 0) + 1
         person.ocr_confidence = confidence
-
-        if person.ocr_candidate_counts[candidate] >= 2:
-            person.employee_no = candidate
-            person.ocr_confirmed = True
-
-    def register_ocr_frame_candidate(
-        self,
-        minute_frame_store: dict,
-        minute_bucket: int,
-        person,
-        frame_no: int,
-        crop_image_path: str,
-    ) -> None:
-        score = self.calculate_best_frame_score(person)
-
-        minute_frame_store[minute_bucket].append(
-            {
-                "path": crop_image_path,
-                "score": score,
-                "track_id": person.id,
-                "employee_no": getattr(person, "employee_no", None),
-                "frame_no": frame_no,
-            }
-        )
-
-    def calculate_best_frame_score(self, person) -> float:
-        area_score = float(person.get_bbox_area()) if hasattr(person, "get_bbox_area") else 0.0
-        confidence_score = float(getattr(person, "ocr_confidence", 0.0) or 0.0)
-        return area_score + (confidence_score * 1000.0)
+        person.employee_no = candidate
+        person.ocr_confirmed = True
 
     def normalize_employee_no(self, value) -> str | None:
         if value is None:
