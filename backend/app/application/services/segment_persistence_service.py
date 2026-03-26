@@ -1,6 +1,7 @@
 import logging
 from datetime import timedelta
 
+from app.domain.entities.analysis_session import AnalysisSourceType
 from app.domain.entities.analysis_segment import AnalysisSegmentPersonResult, AnalysisSegmentSummary
 
 
@@ -73,7 +74,7 @@ class SegmentPersistenceService:
             summary.id,
             len(person_results),
         )
-        if self.realtime_event_service:
+        if self.realtime_event_service and session.source_type == AnalysisSourceType.WEBCAM:
             self.realtime_event_service.emit_segment_saved(
                 session_id=session.session_id,
                 segment_index=segment_index,

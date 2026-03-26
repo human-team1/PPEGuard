@@ -60,10 +60,8 @@ class VideoAnalysisOcrService:
         person.latest_ocr_regex_matched = True
         person.ocr_candidate_counts[candidate] = person.ocr_candidate_counts.get(candidate, 0) + 1
         person.ocr_confidence = confidence
-
-        if person.ocr_candidate_counts[candidate] >= self.employee_number_min_confirm_count:
-            person.employee_no = candidate
-            person.ocr_confirmed = True
+        person.employee_no = candidate
+        person.ocr_confirmed = True
 
     def normalize_employee_no(self, value) -> str | None:
         if value is None:

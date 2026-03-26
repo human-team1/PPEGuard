@@ -602,25 +602,15 @@ class WebcamRealtimePipelineService:
 
         self._prune_track_state(track_state, current_time_sec)
 
-        candidate_counts: dict[str, int] = {}
-        for item in track_state.ocr_candidates:
-            candidate_counts[item["candidate"]] = candidate_counts.get(item["candidate"], 0) + 1
-
-        confirmed_candidate = None
-        for candidate_value, count in candidate_counts.items():
-            if count >= self.ocr_service.employee_number_min_confirm_count:
-                confirmed_candidate = candidate_value
-                break
-
-        if confirmed_candidate:
-            track_state.employee_no = confirmed_candidate
+        if candidate and getattr(person, "latest_ocr_regex_matched", False):
+            track_state.employee_no = candidate
             track_state.ocr_confirmed = True
-            person.employee_no = confirmed_candidate
+            person.employee_no = candidate
             person.ocr_confirmed = True
             logger.info(
                 "[OCR] confirmed track_id=%s employee_no=%s session_id=%s",
                 track_state.track_id,
-                confirmed_candidate,
+                candidate,
                 self.session.session_id,
             )
 
@@ -665,9 +655,7 @@ class WebcamRealtimePipelineService:
             return False
         if person.crop_image is None or getattr(person.crop_image, "size", 0) == 0:
             return False
-        if not self.ocr_service.should_run_ocr_for_person(person, current_time_sec):
-            return False
-        return bool(getattr(person, "has_vest", False) or person.get_bbox_area() >= 4000)
+        return True
 
     def _build_preview_detection(self, person, track_state: TrackState) -> dict:
         return {
