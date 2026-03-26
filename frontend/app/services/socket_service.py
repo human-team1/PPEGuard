@@ -22,21 +22,48 @@ class SocketService(QObject):
     def __init__(self, server_url: str = "http://127.0.0.1:5000"):
         super().__init__()
         self.server_url = server_url
-        self.sio = socketio.Client(logger=False, engineio_logger=False)
+        # diagnostic: enable client-side logs for connection abort/disconnect tracing
+        self.sio = socketio.Client(
+            logger=True,
+            engineio_logger=True,
+            reconnection=True,
+        )
         self.session_id = None
         self.streaming_enabled = False
+        # diagnostic: None keeps the default transport negotiation order.
+        # temporary debugging: switch to ["polling"] or ["websocket"] when comparing behaviors.
+        self._connect_transports = None
         self._setup_handlers()
 
     def _setup_handlers(self):
         @self.sio.on("connect")
         def on_connect():
-            logger.info("[Socket] connected url=%s", self.server_url)
+            logger.info(
+                "[Socket] connected url=%s sid=%s transports=%s",
+                self.server_url,
+                self.sio.sid,
+                self._connect_transports or "default",
+            )
             self.connected.emit()
 
         @self.sio.on("disconnect")
         def on_disconnect():
-            logger.info("[Socket] disconnected")
+            logger.warning(
+                "[Socket] disconnected url=%s sid=%s transports=%s",
+                self.server_url,
+                self.sio.sid,
+                self._connect_transports or "default",
+            )
             self.disconnected.emit()
+
+        @self.sio.on("connect_error")
+        def on_connect_error(data):
+            logger.error(
+                "[Socket] connect_error url=%s transports=%s data=%s",
+                self.server_url,
+                self._connect_transports or "default",
+                data,
+            )
 
         @self.sio.on("analysis_progress")
         def on_analysis_progress(data):
@@ -76,7 +103,7 @@ class SocketService(QObject):
 
         @self.sio.on("error")
         def on_error(data):
-            message = data.get("message", "알 수 없는 오류")
+            message = data.get("message", "Unknown error")
             logger.error("[Socket] server error message=%s", message)
             self.error_occurred.emit(message)
 
@@ -88,11 +115,28 @@ class SocketService(QObject):
             if self.sio.connected:
                 return True
 
-            logger.info("[Socket] connecting url=%s", self.server_url)
-            self.sio.connect(self.server_url, transports=["websocket", "polling"])
+            logger.info(
+                "[Socket] connecting url=%s transports=%s",
+                self.server_url,
+                self._connect_transports or "default",
+            )
+            connect_kwargs = {}
+            if self._connect_transports is not None:
+                connect_kwargs["transports"] = self._connect_transports
+
+            self.sio.connect(self.server_url, **connect_kwargs)
+            logger.info(
+                "[Socket] connect finished connected=%s sid=%s",
+                self.sio.connected,
+                self.sio.sid,
+            )
             return self.sio.connected
         except Exception as e:
-            logger.exception("[Socket] connect failed url=%s", self.server_url)
+            logger.exception(
+                "[Socket] connect failed url=%s transports=%s",
+                self.server_url,
+                self._connect_transports or "default",
+            )
             self.error_occurred.emit(f"서버 연결 실패: {str(e)}")
             return False
 
@@ -100,7 +144,11 @@ class SocketService(QObject):
         self.streaming_enabled = False
         self.session_id = None
         if self.sio.connected:
-            logger.info("[Socket] disconnect requested")
+            logger.info(
+                "[Socket] disconnect requested url=%s sid=%s",
+                self.server_url,
+                self.sio.sid,
+            )
             self.sio.disconnect()
 
     def start_streaming(self, session_id: str):

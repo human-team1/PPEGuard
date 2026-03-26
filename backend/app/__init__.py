@@ -5,7 +5,13 @@ from app.infrastructure.logging_config import configure_logging
 
 # [가장 검증된 비동기 모드: eventlet]
 # 웹소켓(WebSocket)과 HTTP 전송을 모두 지원하며, 윈도우에서 널리 쓰이는 표준 방식입니다.
-socketio = SocketIO(cors_allowed_origins="*", async_mode='eventlet')
+socketio = SocketIO(
+    cors_allowed_origins="*",
+    async_mode='eventlet',
+    # diagnostic: enable server-side Socket.IO and Engine.IO logs for connection tracing
+    logger=True,
+    engineio_logger=True,
+)
 
 def create_app():
     app = Flask(__name__)
