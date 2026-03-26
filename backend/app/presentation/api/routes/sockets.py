@@ -1,23 +1,15 @@
+import logging
 import os
 
 import torch
 from flask import request
-from flask_socketio import emit
 
 from app import socketio
-from config.settings import Config
 from app.application.dtos import AnalyzeFrameCommand
-from app.application.services.analyze_worker_service import AnalyzeWorker
-from app.application.services.video_analysis_ocr_service import VideoAnalysisOcrService
 from app.application.usecases.analyze_frame_usecase import AnalyzeFrameUseCase
 from app.infrastructure.dependencies import (
-    build_detector,
-    build_ocr_engine,
     build_realtime_event_service,
-    build_segment_result_service,
-)
-from app.infrastructure.service_db.repositories.analysis_session_repository import (
-    SQLAlchemyAnalysisSessionRepository,
+    build_webcam_pipeline_manager,
 )
 
 torch.set_num_threads(1)
@@ -32,34 +24,23 @@ TRACKER_CONFIG = os.path.join(
     "../../../infrastructure/ai_analyzer/configs/bytetrack.yaml",
 )
 
-detector = build_detector(MODEL_PATH, TRACKER_CONFIG)
-worker = AnalyzeWorker(detector)
-ocr_engine = build_ocr_engine()
-ocr_service = VideoAnalysisOcrService(
-    ocr_interval_sec=Config.OCR_INTERVAL_SEC,
-    employee_no_regex=Config.EMPLOYEE_NO_REGEX,
-    employee_no_min_length=Config.EMPLOYEE_NO_MIN_LENGTH,
-    employee_no_max_length=Config.EMPLOYEE_NO_MAX_LENGTH,
-)
-session_repo = SQLAlchemyAnalysisSessionRepository()
 realtime_event_service = build_realtime_event_service()
-segment_result_service = build_segment_result_service(
+webcam_pipeline_manager = build_webcam_pipeline_manager(
+    model_path=MODEL_PATH,
+    tracker_config=TRACKER_CONFIG,
     realtime_event_service=realtime_event_service,
 )
 analyze_frame_usecase = AnalyzeFrameUseCase(
-    worker,
-    session_repo=session_repo,
-    ocr_service=ocr_service,
-    ocr_engine=ocr_engine,
-    segment_result_service=segment_result_service,
+    webcam_pipeline_manager=webcam_pipeline_manager,
     realtime_event_service=realtime_event_service,
 )
 socket_session_map = {}
+logger = logging.getLogger(__name__)
 
 
 @socketio.on("connect")
 def handle_connect():
-    print("[Socket] client connected", flush=True)
+    logger.info("[Socket] client connected sid=%s", request.sid)
 
 
 @socketio.on("frame")
@@ -73,46 +54,29 @@ def handle_frame(data):
             image_base64=image_data,
             session_id=data.get("session_id"),
         )
-        print(
-            f"[Socket] webcam frame received - sid={request.sid}, session_id={command.session_id}",
-            flush=True,
-        )
-        print("[SOCKET] payload decoded", flush=True)
 
         if command.session_id:
             socket_session_map[request.sid] = command.session_id
 
-        print("[SOCKET] analysis started", flush=True)
-        results = analyze_frame_usecase.execute(command)
-        print("[SOCKET] analysis finished", flush=True)
+        analyze_frame_usecase.execute(command)
 
-        serialized_results = []
-        for _, person in results.items():
-            serialized_results.append(
-                {
-                    "id": person.id,
-                    "bbox": person.bbox,
-                    "has_vest": person.has_vest,
-                    "has_helmet": person.has_helmet,
-                    "is_safe": person.is_safe(),
-                    "confidence": float(person.confidence),
-                }
-            )
-
-        emit("results", {"persons": serialized_results})
-
-    except Exception as e:
-        print(f"[Socket] processing error: {e}", flush=True)
-        emit("error", {"message": f"분석 중 오류 발생: {str(e)}"})
+    except Exception as exc:
+        logger.exception(
+            "[Socket] frame processing failed sid=%s session_id=%s",
+            request.sid,
+            data.get("session_id") if isinstance(data, dict) else None,
+        )
+        realtime_event_service.emit_error(f"분석 중 오류 발생: {str(exc)}")
 
 
 @socketio.on("disconnect")
 def handle_disconnect():
     session_id = socket_session_map.pop(request.sid, None)
     if session_id:
-        print(
-            f"[Socket] disconnect flush triggered - sid={request.sid}, session_id={session_id}",
-            flush=True,
+        logger.info(
+            "[Socket] disconnect finalize sid=%s session_id=%s",
+            request.sid,
+            session_id,
         )
         analyze_frame_usecase.finalize_session(session_id, reason="disconnect")
-    print("[Socket] client disconnected", flush=True)
+    logger.info("[Socket] client disconnected sid=%s", request.sid)

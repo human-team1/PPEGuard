@@ -8,7 +8,8 @@ from app.domain.rules import map_gear_to_person, evaluate_ppe_status
 class AnalyzeWorker:
     """
     비즈니스 유스케이스 흐름 오케스트레이터
-    - 웹캠 / 영상 모두 track 기반
+    - 웹캠: track 기반
+    - 비디오 파일: predict 기반
     """
 
     def __init__(self, detector: IDetector):

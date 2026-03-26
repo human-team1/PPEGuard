@@ -38,6 +38,7 @@ class GetSessionSegmentsUseCase:
                     people=[
                         AnalysisSegmentPersonResultResponseDto(
                             person_result_id=person.id,
+                            local_person_id=person.track_id,
                             track_id=person.track_id,
                             employee_id=person.employee_id,
                             ocr_number=person.ocr_number,
