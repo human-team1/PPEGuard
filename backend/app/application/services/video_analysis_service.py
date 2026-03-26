@@ -101,15 +101,24 @@ class VideoAnalysisService:
         if video_started_at:
             if isinstance(video_started_at, datetime):
                 video_started_at_dt = video_started_at
+                video_started_at_source = "user_input"
             else:
                 try:
                     video_started_at_dt = datetime.fromisoformat(video_started_at)
+                    video_started_at_source = "user_input"
                 except Exception:
                     raise ValueError(
                         "video_started_at 형식이 올바르지 않습니다. (예: 2026-03-25 14:30:00)"
                     )
         else:
             video_started_at_dt = datetime.now()
+            video_started_at_source = "server_now"
+
+        print(
+            "[VideoAnalysis] video_started_at resolved - "
+            f"source={video_started_at_source}, value={video_started_at_dt.isoformat()}",
+            flush=True,
+        )
 
         if video_file is None:
             raise ValueError("업로드 파일이 없습니다.")

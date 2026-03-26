@@ -43,6 +43,7 @@ class ResultView(QWidget):
         self.settings = settings
         self.list_worker = None
         self.pending_reload = False
+        self._is_shutting_down = False
         self.current_session_id = None
         self.current_dashboard = None
         self.pending_source_type = None
@@ -224,8 +225,27 @@ class ResultView(QWidget):
         if self.current_dashboard is not None:
             self._apply_cached_dashboard()
 
+    def begin_shutdown(self):
+        self._is_shutting_down = True
+        self.pending_reload = False
+        self.segment_sync_timer.stop()
+
     def load_results(self, reason: str = "manual"):
+        if self._is_shutting_down:
+            print(
+                f"[ResultView] load_results skipped during shutdown - reason={reason}",
+                flush=True,
+            )
+            return
         if self.list_worker and self.list_worker.isRunning():
+            if self.current_analysis_status in {"completed", "failed"}:
+                print(
+                    "[ResultView] load_results skipped - "
+                    f"reason={reason}, status={self.current_analysis_status}, "
+                    "worker already running",
+                    flush=True,
+                )
+                return
             self.pending_reload = True
             return
         if not self.current_session_id:
@@ -419,6 +439,8 @@ class ResultView(QWidget):
                 self.segment_sync_timer.start()
         if status in {"completed", "failed", "stopping"}:
             self.segment_sync_timer.stop()
+        if status in {"completed", "failed"}:
+            self.pending_reload = False
         if status in {"completed", "failed"} and self.current_session_id == session_id:
             self.load_results(reason=f"session_status:{status}")
 
@@ -446,9 +468,14 @@ class ResultView(QWidget):
 
     def _clear_list_worker(self):
         self.list_worker = None
-        if self.pending_reload:
+        if self.pending_reload and not self._is_shutting_down:
+            if self.current_analysis_status in {"completed", "failed"}:
+                self.pending_reload = False
+                return
             self.pending_reload = False
             self.load_results(reason="pending_reload")
+            return
+        self.pending_reload = False
 
     def _is_processing_video_session(self) -> bool:
         return (
