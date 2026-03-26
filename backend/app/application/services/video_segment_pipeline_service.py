@@ -103,7 +103,7 @@ class VideoSegmentResult:
 
 @dataclass
 class SegmentPersonState:
-    local_id: int
+    track_id: int
     bbox: list[int]
     last_seen_frame_no: int
     employee_no: str | None = None
@@ -134,7 +134,7 @@ class VideoSegmentPipelineService:
         self.persistence_service = persistence_service
         self.realtime_event_service = realtime_event_service
         self.segment_window_service = segment_window_service
-        self.analysis_fps = max(float(analysis_fps or 0.0), 0.1)
+        self.analysis_fps = 1.0
         self.max_concurrent_segments = max(int(max_concurrent_segments or 0), 1)
         self.yolo_pool = QueueWorkerPool(
             name="yolo",
@@ -243,14 +243,6 @@ class VideoSegmentPipelineService:
                     completed_segments += 1
                     next_segment_index += 1
 
-                    self.realtime_event_service.emit_progress(
-                        session_id=session.session_id,
-                        source_type=source_type,
-                        current_time_sec=ordered_result.segment_end_sec,
-                        total_time_sec=total_time_sec,
-                        processed_frames=processed_frames,
-                        current_counts=ordered_result.current_counts,
-                    )
                     ordered_result.people_results.clear()
                     if ordered_result.representative_frame_info is not None:
                         ordered_result.representative_frame_info.clear()
@@ -307,7 +299,6 @@ class VideoSegmentPipelineService:
 
         sample_step = max(int(round(fps / self.analysis_fps)), 1)
         person_states: dict[int, SegmentPersonState] = {}
-        next_local_person_id = 1
         processed_frames = 0
         ocr_request_count = 0
 
@@ -327,19 +318,15 @@ class VideoSegmentPipelineService:
                 frame_no = frame_index + 1
                 frame_time_sec = frame_no / fps if fps > 0 else 0.0
                 detected_people = self.yolo_pool.submit(frame).result()
-                people = self._assign_local_person_ids(
+                people = self._sync_tracked_people(
                     detected_people=detected_people,
                     person_states=person_states,
-                    next_local_person_id_ref=[next_local_person_id],
                     frame_no=frame_no,
                 )
-                next_local_person_id = max([next_local_person_id] + [person.id + 1 for person in people])
 
                 ocr_jobs = []
                 for person in people:
                     if not self._should_request_ocr(person):
-                        continue
-                    if not self.ocr_service.should_run_ocr_for_person(person, frame_time_sec):
                         continue
 
                     person.last_ocr_at_sec = frame_time_sec
@@ -420,78 +407,38 @@ class VideoSegmentPipelineService:
             return None
         return self.ocr_engine.extract_worker_id(crop_image)
 
-    def _assign_local_person_ids(
+    def _sync_tracked_people(
         self,
         detected_people: list,
         person_states: dict[int, SegmentPersonState],
-        next_local_person_id_ref: list[int],
         frame_no: int,
     ) -> list:
-        assigned_people = []
-        used_state_ids: set[int] = set()
-
-        for person in sorted(
-            detected_people,
-            key=lambda item: float(item.get_bbox_area()) if hasattr(item, "get_bbox_area") else 0.0,
-            reverse=True,
-        ):
-            matched_state = self._find_best_state_match(
-                bbox=person.bbox,
-                person_states=person_states,
-                used_state_ids=used_state_ids,
-                frame_no=frame_no,
-            )
-
-            if matched_state is None:
-                matched_state = SegmentPersonState(
-                    local_id=next_local_person_id_ref[0],
+        tracked_people = []
+        for person in detected_people:
+            state = person_states.get(person.id)
+            if state is None:
+                state = SegmentPersonState(
+                    track_id=person.id,
                     bbox=list(person.bbox),
                     last_seen_frame_no=frame_no,
                 )
-                person_states[matched_state.local_id] = matched_state
-                next_local_person_id_ref[0] += 1
+                person_states[person.id] = state
 
-            used_state_ids.add(matched_state.local_id)
-            matched_state.bbox = list(person.bbox)
-            matched_state.last_seen_frame_no = frame_no
+            state.bbox = list(person.bbox)
+            state.last_seen_frame_no = frame_no
+            person.employee_no = state.employee_no
+            person.ocr_confirmed = state.ocr_confirmed
+            person.last_ocr_at_sec = state.last_ocr_at_sec
+            person.ocr_candidate_counts = dict(state.ocr_candidate_counts)
+            tracked_people.append(person)
 
-            person.id = matched_state.local_id
-            person.employee_no = matched_state.employee_no
-            person.ocr_confirmed = matched_state.ocr_confirmed
-            person.last_ocr_at_sec = matched_state.last_ocr_at_sec
-            person.ocr_candidate_counts = dict(matched_state.ocr_candidate_counts)
-            assigned_people.append(person)
-
-        return assigned_people
+        return tracked_people
 
     def _sync_person_state(self, state: SegmentPersonState, person) -> None:
         state.employee_no = getattr(person, "employee_no", None)
         state.ocr_confirmed = bool(getattr(person, "ocr_confirmed", False))
         state.last_ocr_at_sec = getattr(person, "last_ocr_at_sec", None)
         state.ocr_candidate_counts = dict(getattr(person, "ocr_candidate_counts", {}))
-
-    def _find_best_state_match(
-        self,
-        bbox: list[int],
-        person_states: dict[int, SegmentPersonState],
-        used_state_ids: set[int],
-        frame_no: int,
-    ) -> SegmentPersonState | None:
-        best_state = None
-        best_iou = 0.0
-
-        for state in person_states.values():
-            if state.local_id in used_state_ids:
-                continue
-            if (frame_no - state.last_seen_frame_no) > 2:
-                continue
-
-            iou = self._calculate_iou(bbox, state.bbox)
-            if iou >= 0.3 and iou > best_iou:
-                best_iou = iou
-                best_state = state
-
-        return best_state
 
     def _build_segment_tasks(
         self,
@@ -535,7 +482,7 @@ class VideoSegmentPipelineService:
             return False
         if person.crop_image is None or getattr(person.crop_image, "size", 0) == 0:
             return False
-        return bool(getattr(person, "has_vest", False) or person.get_bbox_area() >= 4000)
+        return True
 
     def _calculate_iou(self, bbox1: list[int], bbox2: list[int]) -> float:
         x1 = max(bbox1[0], bbox2[0])

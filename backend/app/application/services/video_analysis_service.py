@@ -68,7 +68,7 @@ class VideoAnalysisService:
         self.employee_no_min_length = Config.EMPLOYEE_NO_MIN_LENGTH
         self.employee_no_max_length = Config.EMPLOYEE_NO_MAX_LENGTH
         self.segment_duration_seconds = Config.SEGMENT_DURATION_SECONDS
-        self.analysis_fps = Config.ANALYSIS_FPS
+        self.analysis_fps = 1.0
         self.max_concurrent_segments = Config.MAX_CONCURRENT_SEGMENTS
         self.yolo_worker_count = Config.YOLO_WORKER_COUNT
         self.ocr_worker_count = Config.OCR_WORKER_COUNT
@@ -145,7 +145,7 @@ class VideoAnalysisService:
             self.ocr_worker_count,
         )
         logger.info(
-            "[VideoAnalysis] frame_interval_sec is metadata only analysis_fps=%s",
+            "[VideoAnalysis] frame_interval_sec is metadata only video path uses fixed analysis_fps=%s",
             self.analysis_fps,
         )
 
@@ -162,18 +162,6 @@ class VideoAnalysisService:
         
         # (추가) 현재 처리 중인 세션 ID 등록하여 세션 ID를 모르는 프론트엔드에서도 중단 가능케 함
         VideoAnalysisService._current_processing_session = session_id
-
-        self.realtime_event_service.emit_session_status(
-            session_id=session_id,
-            source_type=AnalysisSourceType.VIDEO_FILE.value,
-            status="started",
-        )
-        self.realtime_event_service.emit_session_status(
-            session_id=session_id,
-            source_type=AnalysisSourceType.VIDEO_FILE.value,
-            status="processing",
-        )
-
 
         try:
             pipeline = VideoSegmentPipelineService(
@@ -225,12 +213,6 @@ class VideoAnalysisService:
                 processed_frame_count,
                 time.perf_counter() - started_at,
             )
-            self.realtime_event_service.emit_session_status(
-                session_id=session_id,
-                source_type=AnalysisSourceType.VIDEO_FILE.value,
-                status="completed",
-            )
-
             updated_session = self.get_analysis_session_usecase.execute(session_id)
             VideoAnalysisService._current_processing_session = None
             return updated_session
@@ -238,10 +220,4 @@ class VideoAnalysisService:
         except Exception as exc:
             logger.exception("[AnalysisSession] failed session_id=%s", session_id)
             self.fail_analysis_session_usecase.execute(session_id, str(exc))
-            self.realtime_event_service.emit_session_status(
-                session_id=session_id,
-                source_type=AnalysisSourceType.VIDEO_FILE.value,
-                status="failed",
-            )
-            VideoAnalysisService._current_processing_session = None
             raise
