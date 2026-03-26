@@ -6,6 +6,7 @@ __pycache__/
 # Virtual environment
 .venv/
 venv/
+frontend/.venv/
 backend/.venv/
 
 # VS Code
@@ -17,6 +18,7 @@ Thumbs.db
 
 # Logs
 *.log
+backend/flask.log
 
 # Python build
 build/
@@ -31,6 +33,7 @@ frontend/dist/
 # uploaded/generated files
 backend/uploads/crops/*
 backend/uploads/videos/*
+backend/ppe_guard.db
 
 # keep directory
 !backend/uploads/crops/.gitkeep

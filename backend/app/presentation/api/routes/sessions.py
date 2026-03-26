@@ -1,36 +1,22 @@
 from datetime import datetime
 from flask import Blueprint, request, jsonify
 
-from app.infrastructure.service_db.repositories.analysis_session_repository import SQLAlchemyAnalysisSessionRepository
-from app.infrastructure.service_db.repositories.analysis_frame_repository import SQLAlchemyAnalysisFrameRepository
-from app.infrastructure.service_db.repositories.detection_result_repository import SQLAlchemyDetectionResultRepository
-from app.infrastructure.customer_db.repositories.customer_detection_result_repository_impl import SQLAlchemyCustomerDetectionResultRepository
-
-from app.application.usecases.start_analysis_session import StartAnalysisSessionUseCase
-from app.application.usecases.get_analysis_session import GetAnalysisSessionUseCase
-from app.application.usecases.stop_analysis_session import StopAnalysisSessionUseCase
-from app.application.usecases.get_session_results import GetSessionResultsUseCase
-from app.application.usecases.get_session_frames import GetSessionFramesUseCase
-from app.application.usecases.process_detection_result import ProcessDetectionResultUseCase
-
+from config.settings import Config
 from app.application.dtos import StartSessionCommand, ProcessDetectionCommand
 from app.domain.entities.analysis_session import AnalysisSourceType
 from app.domain.entities.detection_result import ItemWearStatus
+from app.infrastructure.dependencies import (
+    build_get_session_frames_usecase,
+    build_get_session_results_usecase,
+    build_get_session_segments_usecase,
+    build_get_session_usecase,
+    build_process_detection_result_usecase,
+    build_start_session_usecase,
+    build_stop_session_usecase,
+)
 from app.presentation.api.schemas.serializers import serialize
 
 sessions_bp = Blueprint('sessions', __name__, url_prefix='/api/v1/sessions')
-
-def get_session_repo():
-    return SQLAlchemyAnalysisSessionRepository()
-
-def get_frame_repo():
-    return SQLAlchemyAnalysisFrameRepository()
-
-def get_result_repo():
-    return SQLAlchemyDetectionResultRepository()
-
-def get_customer_result_repo():
-    return SQLAlchemyCustomerDetectionResultRepository()
 
 @sessions_bp.route('', methods=['POST'])
 def create_session():
@@ -47,7 +33,7 @@ def create_session():
 
         cmd = StartSessionCommand(
             source_type=source_type,
-            frame_interval_sec=int(data.get('frame_interval_sec', 3)),
+            frame_interval_sec=int(data.get('frame_interval_sec', Config.FRAME_INTERVAL_SEC)),
             source_name=data.get('source_name'),
             requested_by=data.get('requested_by'),
             total_frames=data.get('total_frames'),
@@ -56,14 +42,14 @@ def create_session():
     except Exception as e:
         return jsonify({"error": "Bad Request", "details": str(e)}), 400
 
-    usecase = StartAnalysisSessionUseCase(get_session_repo())
+    usecase = build_start_session_usecase()
     session = usecase.execute(cmd)
 
     return jsonify(serialize(session)), 201
 
 @sessions_bp.route('/<session_id>', methods=['GET'])
 def get_session(session_id: str):
-    usecase = GetAnalysisSessionUseCase(get_session_repo())
+    usecase = build_get_session_usecase()
     session = usecase.execute(session_id)
     if not session:
         return jsonify({"error": "Session not found"}), 404
@@ -71,7 +57,7 @@ def get_session(session_id: str):
 
 @sessions_bp.route('/<session_id>/frames', methods=['GET'])
 def get_session_frames(session_id: str):
-    usecase = GetSessionFramesUseCase(get_session_repo(), get_frame_repo())
+    usecase = build_get_session_frames_usecase()
     try:
         frames = usecase.execute(session_id)
         return jsonify(serialize(frames)), 200
@@ -80,7 +66,15 @@ def get_session_frames(session_id: str):
 
 @sessions_bp.route('/<session_id>/stop', methods=['POST'])
 def stop_session(session_id: str):
-    usecase = StopAnalysisSessionUseCase(get_session_repo())
+    try:
+        from app.presentation.api.routes.sockets import analyze_frame_usecase
+
+        print(f"[Socket] stop flush triggered - session_id={session_id}", flush=True)
+        analyze_frame_usecase.finalize_session(session_id, reason="stop")
+    except Exception:
+        pass
+
+    usecase = build_stop_session_usecase()
     try:
         session = usecase.execute(session_id)
         return jsonify(serialize(session)), 200
@@ -89,17 +83,19 @@ def stop_session(session_id: str):
 
 @sessions_bp.route('/<session_id>/results', methods=['GET'])
 def get_session_results(session_id: str):
-    usecase = GetSessionResultsUseCase(
-        get_session_repo(),
-        get_result_repo(),
-        get_frame_repo(),
-        )
+    usecase = build_get_session_results_usecase()
     try:
         results = usecase.execute(session_id)
-        print("DEBUG results:", results)
-        if results:
-            print("DEBUG first frame_time_sec:", results[0].frame_time_sec)
         return jsonify(serialize(results)), 200
+    except ValueError:
+        return jsonify({"error": "Session not found"}), 404
+
+@sessions_bp.route('/<session_id>/segments', methods=['GET'])
+def get_session_segments(session_id: str):
+    usecase = build_get_session_segments_usecase()
+    try:
+        segments = usecase.execute(session_id)
+        return jsonify(serialize(segments)), 200
     except ValueError:
         return jsonify({"error": "Session not found"}), 404
 
@@ -125,12 +121,7 @@ def process_result(session_id: str):
     except Exception as e:
         return jsonify({"error": "Bad Request", "details": str(e)}), 400
 
-    usecase = ProcessDetectionResultUseCase(
-        session_repo=get_session_repo(),
-        frame_repo=get_frame_repo(),
-        result_repo=get_result_repo(),
-        customer_result_repo=get_customer_result_repo()
-    )
+    usecase = build_process_detection_result_usecase()
 
     try:
         result = usecase.execute(cmd)

@@ -1,53 +1,70 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QProgressBar
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QLabel, QProgressBar, QVBoxLayout, QWidget
+
 
 class StatusWidget(QWidget):
-    """분석 요청의 진행 상태(로딩 인디케이터, 성공/실패 텍스트)를 담당하는 UI 컴포넌트"""
+    STATE_STYLES = {
+        "대기": ("#555", False),
+        "시작 요청중": ("#1976D2", True),
+        "분석중": ("#1565C0", True),
+        "종료 요청중": ("#EF6C00", True),
+        "중지": ("#455A64", False),
+        "실패": ("#D32F2F", False),
+    }
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._init_ui()
-        
+        self.set_analysis_state("대기")
+
     def _init_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
         layout.setSpacing(5)
-        
-        status_label_header = QLabel("분석 상태:")
-        status_label_header.setStyleSheet("font-weight: bold; font-size: 11px; color: #333;")
-        layout.addWidget(status_label_header)
-        
-        self.status_label = QLabel("대기 중")
+
+        header = QLabel("분석 상태")
+        header.setStyleSheet("font-weight: bold; font-size: 11px; color: #333;")
+        layout.addWidget(header)
+
+        self.state_label = QLabel()
+        self.state_label.setAlignment(Qt.AlignCenter)
+        self.state_label.setStyleSheet("font-size: 13px; font-weight: bold; padding: 4px;")
+        layout.addWidget(self.state_label)
+
+        self.status_label = QLabel()
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet("font-size: 11px; color: #555; padding: 4px;")
-        
+        layout.addWidget(self.status_label)
+
         self.progress_bar = QProgressBar()
-        # min/max를 둘 다 0으로 맞추면 좌우로 움직이는 애니메이션 로딩 바 동작
-        self.progress_bar.setRange(0, 0) 
+        self.progress_bar.setRange(0, 0)
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setMaximumHeight(5)
         self.progress_bar.hide()
-        
-        layout.addWidget(self.status_label)
         layout.addWidget(self.progress_bar)
         layout.addStretch()
-        
+
+    def set_analysis_state(self, state: str, message: str | None = None):
+        color, loading = self.STATE_STYLES.get(state, ("#555", False))
+        self.state_label.setText(state)
+        self.state_label.setStyleSheet(
+            f"font-size: 13px; font-weight: bold; color: {color}; padding: 4px;"
+        )
+        self.status_label.setText(message or state)
+        self.status_label.setStyleSheet(
+            f"font-size: 11px; color: {color}; padding: 4px;"
+        )
+        self.progress_bar.setVisible(loading)
+
     def show_loading(self, message: str):
-        self.status_label.setText(message)
-        self.status_label.setStyleSheet("font-size: 11px; color: #1976D2; font-weight: bold; padding: 4px;")
-        self.progress_bar.show()
-        
+        self.set_analysis_state("시작 요청중", message)
+
     def show_success(self, message: str):
-        self.status_label.setText(message)
-        self.status_label.setStyleSheet("font-size: 11px; color: #388E3C; font-weight: bold; padding: 4px;")
-        self.progress_bar.hide()
-        
+        self.set_analysis_state("중지", message)
+
     def show_error(self, message: str):
-        self.status_label.setText(f"오류: {message}")
-        self.status_label.setStyleSheet("font-size: 11px; color: #D32F2F; font-weight: bold; padding: 4px;")
-        self.progress_bar.hide()
-        
+        self.set_analysis_state("실패", message)
+
     def reset(self):
-        self.status_label.setText("대기 중")
-        self.status_label.setStyleSheet("font-size: 11px; color: #555; padding: 4px;")
-        self.progress_bar.hide()
+        self.set_analysis_state("대기", "분석을 시작할 수 있습니다.")

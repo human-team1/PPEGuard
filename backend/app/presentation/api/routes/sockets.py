@@ -1,90 +1,118 @@
 import os
-import time 
-import torch 
-from flask_socketio import emit
-from app import socketio
 
+import torch
+from flask import request
+from flask_socketio import emit
+
+from app import socketio
+from config.settings import Config
 from app.application.dtos import AnalyzeFrameCommand
 from app.application.services.analyze_worker_service import AnalyzeWorker
+from app.application.services.video_analysis_ocr_service import VideoAnalysisOcrService
 from app.application.usecases.analyze_frame_usecase import AnalyzeFrameUseCase
-from app.application.usecases.process_detection_result import ProcessDetectionResultUseCase
-from app.infrastructure.ai_analyzer.yolo_detector import YoloDetector
-from app.infrastructure.service_db.repositories.analysis_session_repository import SQLAlchemyAnalysisSessionRepository
-from app.infrastructure.service_db.repositories.analysis_frame_repository import SQLAlchemyAnalysisFrameRepository
-from app.infrastructure.service_db.repositories.detection_result_repository import SQLAlchemyDetectionResultRepository
-
-# [필수 패치: eventlet 환경에서의 PyTorch 연산 지연 방지]
-torch.set_num_threads(1)
-
-# AI 엔진 및 유스케이스 초기화 (Presentation Layer)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# MODEL_PATH = os.path.join(BASE_DIR, "../../../infrastructure/ai_analyzer/models/best.pt")
-MODEL_PATH = os.path.join(BASE_DIR, "../../../infrastructure/ai_analyzer/models/yolo11s_ft_aug_best.pt")
-TRACKER_CONFIG = os.path.join(BASE_DIR, "../../../infrastructure/ai_analyzer/configs/bytetrack.yaml")
-
-detector = YoloDetector(MODEL_PATH, TRACKER_CONFIG)
-worker = AnalyzeWorker(detector)
-
-# [Step 2 지원] 리포지토리 및 프로세스 유스케이스 초기화
-session_repo = SQLAlchemyAnalysisSessionRepository()
-frame_repo = SQLAlchemyAnalysisFrameRepository()
-result_repo = SQLAlchemyDetectionResultRepository()
-
-process_result_usecase = ProcessDetectionResultUseCase(
-    session_repo=session_repo,
-    frame_repo=frame_repo,
-    result_repo=result_repo,
-    customer_result_repo=None # 고객 DB 연동은 환경 설정에 따라 추가 필요
+from app.infrastructure.dependencies import (
+    build_detector,
+    build_ocr_engine,
+    build_realtime_event_service,
+    build_segment_result_service,
+)
+from app.infrastructure.service_db.repositories.analysis_session_repository import (
+    SQLAlchemyAnalysisSessionRepository,
 )
 
-analyze_frame_usecase = AnalyzeFrameUseCase(worker, process_result_usecase=process_result_usecase)
+torch.set_num_threads(1)
 
-@socketio.on('connect')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(
+    BASE_DIR,
+    "../../../infrastructure/ai_analyzer/models/yolo11s_ft_aug_best.pt",
+)
+TRACKER_CONFIG = os.path.join(
+    BASE_DIR,
+    "../../../infrastructure/ai_analyzer/configs/bytetrack.yaml",
+)
+
+detector = build_detector(MODEL_PATH, TRACKER_CONFIG)
+worker = AnalyzeWorker(detector)
+ocr_engine = build_ocr_engine()
+ocr_service = VideoAnalysisOcrService(
+    ocr_interval_sec=Config.OCR_INTERVAL_SEC,
+    employee_no_regex=Config.EMPLOYEE_NO_REGEX,
+    employee_no_min_length=Config.EMPLOYEE_NO_MIN_LENGTH,
+    employee_no_max_length=Config.EMPLOYEE_NO_MAX_LENGTH,
+)
+session_repo = SQLAlchemyAnalysisSessionRepository()
+realtime_event_service = build_realtime_event_service()
+segment_result_service = build_segment_result_service(
+    realtime_event_service=realtime_event_service,
+)
+analyze_frame_usecase = AnalyzeFrameUseCase(
+    worker,
+    session_repo=session_repo,
+    ocr_service=ocr_service,
+    ocr_engine=ocr_engine,
+    segment_result_service=segment_result_service,
+    realtime_event_service=realtime_event_service,
+)
+socket_session_map = {}
+
+
+@socketio.on("connect")
 def handle_connect():
-    print("[CONN] 실시간 분석 클라이언트가 접속했습니다.", flush=True)
+    print("[Socket] client connected", flush=True)
 
-@socketio.on('frame')
+
+@socketio.on("frame")
 def handle_frame(data):
-    """
-    [Socket.IO 전송 핸들러 - Presentation Layer]
-    1. 데이터를 받아 DTO(AnalyzeFrameCommand)로 캡슐화
-    2. UseCase(AnalyzeFrameUseCase)를 실행하여 분석 요청
-    3. 도메인 엔티티(Person) 결과를 받아 최종 Serializing 하여 전달
-    """
-    ts_start = time.time()
     try:
-        image_data = data.get('image')
+        image_data = data.get("image")
         if not image_data:
             return
 
-        # [Presentation]: 입력을 DTO로 묶어 전달 (계층간 통과 규범)
         command = AnalyzeFrameCommand(
             image_base64=image_data,
-            session_id=data.get('session_id')
+            session_id=data.get("session_id"),
         )
-        
-        # [UseCase]: 비즈니스 로직 실행 (전처리 로직은 UseCase가 Service를 사용하여 내부적으로 처리)
+        print(
+            f"[Socket] webcam frame received - sid={request.sid}, session_id={command.session_id}",
+            flush=True,
+        )
+        print("[SOCKET] payload decoded", flush=True)
+
+        if command.session_id:
+            socket_session_map[request.sid] = command.session_id
+
+        print("[SOCKET] analysis started", flush=True)
         results = analyze_frame_usecase.execute(command)
-        
-        # [Presentation]: 결과 데이터 직렬화 및 스트리밍 전송
+        print("[SOCKET] analysis finished", flush=True)
+
         serialized_results = []
+        for _, person in results.items():
+            serialized_results.append(
+                {
+                    "id": person.id,
+                    "bbox": person.bbox,
+                    "has_vest": person.has_vest,
+                    "has_helmet": person.has_helmet,
+                    "is_safe": person.is_safe(),
+                    "confidence": float(person.confidence),
+                }
+            )
 
-        for p_id, person in results.items():
-            serialized_results.append({
-                'id': person.id,
-                'bbox': person.bbox,
-                'has_vest': person.has_vest,
-                'has_helmet': person.has_helmet,
-                'is_safe': person.is_safe(),
-                'confidence': float(person.confidence)
-            })
+        emit("results", {"persons": serialized_results})
 
-        emit('results', {'persons': serialized_results})
-        
     except Exception as e:
-        print(f"[ERR] 통신/분석 에러: {e}", flush=True)
-        emit('error', {'message': f"분석 중 오류 발생: {str(e)}"})
+        print(f"[Socket] processing error: {e}", flush=True)
+        emit("error", {"message": f"분석 중 오류 발생: {str(e)}"})
 
-@socketio.on('disconnect')
+
+@socketio.on("disconnect")
 def handle_disconnect():
-    print("[DISC] 실시간 분석 세션 종료", flush=True)
+    session_id = socket_session_map.pop(request.sid, None)
+    if session_id:
+        print(
+            f"[Socket] disconnect flush triggered - sid={request.sid}, session_id={session_id}",
+            flush=True,
+        )
+        analyze_frame_usecase.finalize_session(session_id, reason="disconnect")
+    print("[Socket] client disconnected", flush=True)

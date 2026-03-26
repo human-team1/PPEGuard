@@ -1,18 +1,29 @@
-import sys
 import os
+import sys
+
+from PySide6.QtCore import QSharedMemory
 from PySide6.QtWidgets import QApplication
 
-# 패스 등록 (app 모듈 내부 절대 경로 임포트 보장)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.ui.views.main_window import MainWindow
 
+
+_SINGLE_INSTANCE_KEY = "PPEGuardDesktopClient"
+
+
 def main():
-    app = QApplication(sys.path)
-    # 폰트, 스타일 등 글로벌 속성 설정 가능
+    shared_memory = QSharedMemory(_SINGLE_INSTANCE_KEY)
+    if shared_memory.attach():
+        return 0
+    if not shared_memory.create(1):
+        return 0
+
+    app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
-    sys.exit(app.exec())
+    return app.exec()
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
