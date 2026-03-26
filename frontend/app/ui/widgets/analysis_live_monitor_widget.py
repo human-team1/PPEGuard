@@ -1,4 +1,5 @@
 import base64
+import logging
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
@@ -14,6 +15,9 @@ from PySide6.QtWidgets import (
 from app.config.result_dashboard_config import LIVE_MONITOR_CARD_DEFINITIONS
 from app.models.dashboard_models import calculate_live_monitor_kpis, get_latest_segment
 from app.ui.widgets.dashboard_metric_card import DashboardMetricCard
+
+
+logger = logging.getLogger(__name__)
 
 
 class AnalysisLiveMonitorWidget(QFrame):
@@ -165,7 +169,7 @@ class AnalysisLiveMonitorWidget(QFrame):
             x2 = int(bbox.get("x2", 0))
             y2 = int(bbox.get("y2", 0))
             label = (
-                f"T:{detection.get('track_id')} "
+                f"P:{detection.get('local_person_id', detection.get('track_id'))} "
                 f"E:{detection.get('employee_id') or '-'} "
                 f"O:{detection.get('ocr_number') or '-'} "
                 f"H:{detection.get('helmet_status')} "
@@ -195,13 +199,6 @@ class AnalysisLiveMonitorWidget(QFrame):
     def handle_segment_saved(self, payload: dict):
         if not self._matches(payload):
             return
-        print(
-            "[LIVE KPI] handle_segment_saved called - "
-            f"session_id={payload.get('session_id')}, "
-            f"segment_index={payload.get('segment_index')}, "
-            f"people={len(payload.get('person_results', []))}",
-            flush=True,
-        )
         self.total_segments = max(self.total_segments, int(payload.get("segment_index") or 0) + 1)
         self.latest_segment_payload = {"people": payload.get("person_results", [])}
         self._update_kpi_cards()
@@ -216,21 +213,6 @@ class AnalysisLiveMonitorWidget(QFrame):
         latest_segment = get_latest_segment(segments)
         self.total_segments = len(segments)
         self.latest_segment_payload = latest_segment
-
-        values = calculate_live_monitor_kpis(
-            latest_segment=self.latest_segment_payload,
-            total_segments=self.total_segments,
-            active_items=list(self.active_items),
-        )
-        latest_people = len((latest_segment or {}).get("people", []))
-        print(
-            "[LIVE KPI] "
-            f"latest_segment_count={self.total_segments}, "
-            f"latest_segment_people={latest_people}, "
-            f"latest_segment_violations={values.get('current_violations', '0')}, "
-            f"violation_rate={values.get('current_violation_rate', '0%')}",
-            flush=True,
-        )
         self._update_kpi_cards()
 
     def _update_kpi_cards(self):
@@ -239,7 +221,7 @@ class AnalysisLiveMonitorWidget(QFrame):
             total_segments=self.total_segments,
             active_items=list(self.active_items),
         )
-        print(f"[LIVE KPI] card update values={values}", flush=True)
+        logger.debug("[LiveMonitor] kpi updated total_segments=%s", self.total_segments)
         for key, card in self.kpi_cards.items():
             card.set_value(values.get(key, "0"))
 

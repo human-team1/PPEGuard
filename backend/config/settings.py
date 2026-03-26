@@ -6,6 +6,7 @@ load_dotenv()
 
 class Config:
     BASE_DIR = Path(__file__).resolve().parent.parent
+    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
     # 우리 서비스 전용 DB
     SERVICE_DATABASE_URI = os.getenv(
@@ -21,10 +22,17 @@ class Config:
     CUSTOMER_DB_USER = os.getenv("CUSTOMER_DB_USER", "")
     CUSTOMER_DB_PASSWORD = os.getenv("CUSTOMER_DB_PASSWORD", "")
 
-    # OCR 설정
-    EMPLOYEE_NO_REGEX = os.getenv("EMPLOYEE_NO_REGEX", "")
+    # OCR / 비디오 분석 설정
+    EMPLOYEE_NUMBER_REGEX = os.getenv(
+        "EMPLOYEE_NUMBER_REGEX",
+        os.getenv("EMPLOYEE_NO_REGEX", ""),
+    )
+    EMPLOYEE_NO_REGEX = EMPLOYEE_NUMBER_REGEX
     EMPLOYEE_NO_MIN_LENGTH = int(os.getenv("EMPLOYEE_NO_MIN_LENGTH", "0"))
     EMPLOYEE_NO_MAX_LENGTH = int(os.getenv("EMPLOYEE_NO_MAX_LENGTH", "0"))
+    EMPLOYEE_NUMBER_MIN_CONFIRM_COUNT = int(
+        os.getenv("EMPLOYEE_NUMBER_MIN_CONFIRM_COUNT", "2")
+    )
     OCR_INTERVAL_SEC = float(os.getenv("OCR_INTERVAL_SEC", "1"))
 
     @classmethod
@@ -36,6 +44,22 @@ class Config:
 
     UPLOAD_DIR = os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads"))
     FRAME_INTERVAL_SEC = float(os.getenv("FRAME_INTERVAL_SEC", "1"))
+    SEGMENT_DURATION_SECONDS = float(os.getenv("SEGMENT_DURATION_SECONDS", "10"))
+    ANALYSIS_FPS = float(os.getenv("ANALYSIS_FPS", "1"))
+    MAX_CONCURRENT_SEGMENTS = int(os.getenv("MAX_CONCURRENT_SEGMENTS", "2"))
+    VIDEO_PIPELINE_QUEUE_SIZE = int(os.getenv("VIDEO_PIPELINE_QUEUE_SIZE", "4"))
+    YOLO_QUEUE_SIZE = int(os.getenv("YOLO_QUEUE_SIZE", "4"))
+    OCR_QUEUE_SIZE = int(os.getenv("OCR_QUEUE_SIZE", "8"))
+    WEBCAM_CAPTURE_FPS = float(os.getenv("WEBCAM_CAPTURE_FPS", "10"))
+    WEBCAM_ANALYSIS_FPS = float(os.getenv("WEBCAM_ANALYSIS_FPS", "3"))
+    WEBCAM_FRAME_QUEUE_SIZE = int(os.getenv("WEBCAM_FRAME_QUEUE_SIZE", "4"))
+    WEBCAM_EVENT_QUEUE_SIZE = int(os.getenv("WEBCAM_EVENT_QUEUE_SIZE", "8"))
+    WEBCAM_RESULT_WINDOW_SECONDS = float(os.getenv("WEBCAM_RESULT_WINDOW_SECONDS", "10"))
+    WEBCAM_TRACK_EXPIRY_SECONDS = float(os.getenv("WEBCAM_TRACK_EXPIRY_SECONDS", "5"))
+    WEBCAM_MAX_TRACK_OCR_COUNT = int(os.getenv("WEBCAM_MAX_TRACK_OCR_COUNT", "6"))
+    SEGMENT_RESULT_TTL_SECONDS = float(os.getenv("SEGMENT_RESULT_TTL_SECONDS", "10"))
+    YOLO_WORKER_COUNT = int(os.getenv("YOLO_WORKER_COUNT", "1"))
+    OCR_WORKER_COUNT = int(os.getenv("OCR_WORKER_COUNT", "1"))
 
     YOLO_MODEL_PATH = os.getenv(
         "YOLO_MODEL_PATH",

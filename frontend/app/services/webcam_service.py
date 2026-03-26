@@ -1,3 +1,4 @@
+import os
 import time
 
 import cv2
@@ -17,7 +18,8 @@ class WebcamService(QThread):
         self.camera_id = camera_id
         self._is_running = False
         self.capture = None
-        self.stride_sec = 1.0 / fps_limit
+        configured_fps = float(os.getenv("WEBCAM_CAPTURE_FPS", str(fps_limit)))
+        self.stride_sec = 1.0 / max(configured_fps, 0.1)
         self.last_sent_time = 0
 
     def run(self):
@@ -25,7 +27,7 @@ class WebcamService(QThread):
         self.capture = cv2.VideoCapture(self.camera_id)
 
         if not self.capture.isOpened():
-            self.error_occurred.emit(f"카메라 장치(ID: {self.camera_id})를 열 수 없습니다.")
+            self.error_occurred.emit(f"카메라 장치(ID: {self.camera_id})를 찾을 수 없습니다.")
             self._is_running = False
             return
 
@@ -37,7 +39,7 @@ class WebcamService(QThread):
 
             ret, frame = self.capture.read()
             if not ret:
-                self.error_occurred.emit("카메라에서 영상 프레임을 읽어올 수 없습니다.")
+                self.error_occurred.emit("카메라에서 영상 프레임을 읽을 수 없습니다.")
                 break
 
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)

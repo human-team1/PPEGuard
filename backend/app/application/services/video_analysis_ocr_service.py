@@ -6,11 +6,13 @@ class VideoAnalysisOcrService:
         self,
         ocr_interval_sec: float,
         employee_no_regex: str,
+        employee_number_min_confirm_count: int,
         employee_no_min_length: int,
         employee_no_max_length: int,
     ):
         self.ocr_interval_sec = ocr_interval_sec
         self.employee_no_regex = employee_no_regex
+        self.employee_number_min_confirm_count = max(int(employee_number_min_confirm_count or 0), 1)
         self.employee_no_min_length = employee_no_min_length
         self.employee_no_max_length = employee_no_max_length
 
@@ -59,34 +61,9 @@ class VideoAnalysisOcrService:
         person.ocr_candidate_counts[candidate] = person.ocr_candidate_counts.get(candidate, 0) + 1
         person.ocr_confidence = confidence
 
-        if person.ocr_candidate_counts[candidate] >= 2:
+        if person.ocr_candidate_counts[candidate] >= self.employee_number_min_confirm_count:
             person.employee_no = candidate
             person.ocr_confirmed = True
-
-    def register_ocr_frame_candidate(
-        self,
-        minute_frame_store: dict,
-        minute_bucket: int,
-        person,
-        frame_no: int,
-        crop_image_path: str,
-    ) -> None:
-        score = self.calculate_best_frame_score(person)
-
-        minute_frame_store[minute_bucket].append(
-            {
-                "path": crop_image_path,
-                "score": score,
-                "track_id": person.id,
-                "employee_no": getattr(person, "employee_no", None),
-                "frame_no": frame_no,
-            }
-        )
-
-    def calculate_best_frame_score(self, person) -> float:
-        area_score = float(person.get_bbox_area()) if hasattr(person, "get_bbox_area") else 0.0
-        confidence_score = float(getattr(person, "ocr_confidence", 0.0) or 0.0)
-        return area_score + (confidence_score * 1000.0)
 
     def normalize_employee_no(self, value) -> str | None:
         if value is None:

@@ -105,7 +105,7 @@ class SessionPersonRowDto:
     person_result_id: int | None
     segment_id: int
     segment_index: int
-    track_id: int | None
+    local_person_id: int | None
     segment_label: str
     reference_time: str
     employee_id: str
@@ -160,7 +160,7 @@ class SessionDashboardDto:
                     person_result_id=person.get("person_result_id"),
                     segment_id=segment.get("segment_id", 0),
                     segment_index=segment.get("segment_index", 0),
-                    track_id=person.get("track_id"),
+                    local_person_id=person.get("local_person_id", person.get("track_id")),
                     segment_label=segment_label,
                     reference_time=reference_time,
                     employee_id=person.get("employee_id") or "-",
@@ -182,7 +182,7 @@ class SessionDashboardDto:
                 row_key = (
                     row.person_result_id,
                     row.segment_id,
-                    row.track_id,
+                    row.local_person_id,
                     row.employee_id,
                     row.ocr_number,
                 )
@@ -190,7 +190,7 @@ class SessionDashboardDto:
 
         all_rows = sorted(
             unique_rows.values(),
-            key=lambda item: (item.segment_index, item.track_id or -1, item.person_result_id or -1),
+            key=lambda item: (item.segment_index, item.local_person_id or -1, item.person_result_id or -1),
         )
 
         filtered_rows = _apply_session_filters(all_rows, filters)

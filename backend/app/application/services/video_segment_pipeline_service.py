@@ -1,0 +1,565 @@
+import gc
+import logging
+import math
+import queue
+import threading
+import time
+from concurrent.futures import Future
+from dataclasses import dataclass, field
+
+import cv2
+
+from config.settings import Config
+from app.application.services.best_frame_selector import BestFrameSelector
+from app.application.services.segment_aggregation_service import SegmentAggregationService
+
+
+logger = logging.getLogger(__name__)
+
+
+class QueueWorkerPool:
+    def __init__(self, name: str, worker_count: int, handler, queue_size: int):
+        self.name = name
+        self.worker_count = max(int(worker_count or 0), 1)
+        self.handler = handler
+        self.tasks: queue.Queue = queue.Queue(maxsize=max(int(queue_size or 0), self.worker_count, 1))
+        self.threads: list[threading.Thread] = []
+
+        for index in range(self.worker_count):
+            thread = threading.Thread(
+                target=self._run_worker,
+                name=f"{self.name}-worker-{index + 1}",
+                daemon=True,
+            )
+            thread.start()
+            self.threads.append(thread)
+
+    def submit(self, payload) -> Future:
+        future: Future = Future()
+        self.tasks.put((payload, future))
+        return future
+
+    def shutdown(self) -> None:
+        for _ in self.threads:
+            self.tasks.put(None)
+        for thread in self.threads:
+            thread.join()
+        self._drain_tasks()
+
+    def _run_worker(self) -> None:
+        while True:
+            item = self.tasks.get()
+            if item is None:
+                self.tasks.task_done()
+                break
+
+            payload, future = item
+            try:
+                result = self.handler(payload)
+            except Exception as exc:
+                future.set_exception(exc)
+            else:
+                future.set_result(result)
+            finally:
+                self.tasks.task_done()
+
+    def _drain_tasks(self) -> None:
+        while True:
+            try:
+                item = self.tasks.get_nowait()
+            except queue.Empty:
+                break
+            self.tasks.task_done()
+            if item is None:
+                continue
+            payload, _future = item
+            if hasattr(payload, "clear"):
+                try:
+                    payload.clear()
+                except Exception:
+                    pass
+
+
+@dataclass
+class VideoSegmentTask:
+    segment_index: int
+    segment_start_sec: float
+    segment_end_sec: float
+    start_frame_index: int
+    end_frame_index: int
+
+
+@dataclass
+class VideoSegmentResult:
+    segment_index: int
+    segment_start_sec: float
+    segment_end_sec: float
+    processed_frames: int
+    people_results: list[dict]
+    representative_frame_path: str | None
+    representative_frame_info: dict | None
+    current_counts: dict
+
+
+@dataclass
+class SegmentPersonState:
+    local_id: int
+    bbox: list[int]
+    last_seen_frame_no: int
+    employee_no: str | None = None
+    ocr_confirmed: bool = False
+    last_ocr_at_sec: float | None = None
+    ocr_candidate_counts: dict[str, int] = field(default_factory=dict)
+
+
+class VideoSegmentPipelineService:
+    def __init__(
+        self,
+        analyze_worker,
+        ocr_engine,
+        ocr_service,
+        file_service,
+        persistence_service,
+        realtime_event_service,
+        segment_window_service,
+        analysis_fps: float,
+        max_concurrent_segments: int,
+        yolo_worker_count: int,
+        ocr_worker_count: int,
+    ):
+        self.analyze_worker = analyze_worker
+        self.ocr_engine = ocr_engine
+        self.ocr_service = ocr_service
+        self.file_service = file_service
+        self.persistence_service = persistence_service
+        self.realtime_event_service = realtime_event_service
+        self.segment_window_service = segment_window_service
+        self.analysis_fps = max(float(analysis_fps or 0.0), 0.1)
+        self.max_concurrent_segments = max(int(max_concurrent_segments or 0), 1)
+        self.yolo_pool = QueueWorkerPool(
+            name="yolo",
+            worker_count=yolo_worker_count,
+            handler=self._run_yolo_prediction,
+            queue_size=Config.YOLO_QUEUE_SIZE,
+        )
+        self.ocr_pool = QueueWorkerPool(
+            name="ocr",
+            worker_count=ocr_worker_count,
+            handler=self._run_ocr_prediction,
+            queue_size=Config.OCR_QUEUE_SIZE,
+        )
+        queue_size = max(Config.VIDEO_PIPELINE_QUEUE_SIZE, self.max_concurrent_segments)
+        self.segment_tasks: queue.Queue = queue.Queue(maxsize=queue_size)
+        self.segment_results: queue.Queue = queue.Queue(maxsize=queue_size)
+        self.stop_event = threading.Event()
+
+    def close(self) -> None:
+        logger.info("[VideoPipeline] cleanup started")
+        self.yolo_pool.shutdown()
+        self.ocr_pool.shutdown()
+        self._drain_queue(self.segment_tasks)
+        self._drain_queue(self.segment_results)
+        self._release_runtime_memory()
+        logger.info("[VideoPipeline] cleanup completed")
+
+    def process_video(
+        self,
+        session,
+        video_path: str,
+        fps: float,
+        total_frames: int,
+        total_time_sec: float,
+        source_type: str,
+    ) -> int:
+        tasks = self._build_segment_tasks(total_frames=total_frames, total_time_sec=total_time_sec, fps=fps)
+        if not tasks:
+            return 0
+
+        logger.info(
+            "[VideoPipeline] started session_id=%s segments=%s analysis_fps=%s max_segments=%s",
+            session.session_id,
+            len(tasks),
+            self.analysis_fps,
+            self.max_concurrent_segments,
+        )
+
+        workers = []
+        for index in range(self.max_concurrent_segments):
+            worker = threading.Thread(
+                target=self._run_segment_worker,
+                kwargs={
+                    "session_id": session.session_id,
+                    "video_path": video_path,
+                    "fps": fps,
+                },
+                name=f"segment-worker-{index + 1}",
+                daemon=True,
+            )
+            worker.start()
+            workers.append(worker)
+
+        for task in tasks:
+            self.segment_tasks.put(task)
+        for _ in workers:
+            self.segment_tasks.put(None)
+
+        processed_frames = 0
+        completed_segments = 0
+        next_segment_index = 0
+        pending_results: dict[int, VideoSegmentResult] = {}
+
+        try:
+            while completed_segments < len(tasks):
+                result = self.segment_results.get()
+                if isinstance(result, Exception):
+                    self.stop_event.set()
+                    raise result
+
+                pending_results[result.segment_index] = result
+                while next_segment_index in pending_results:
+                    ordered_result = pending_results.pop(next_segment_index)
+                    self.persistence_service.save_segment(
+                        session=session,
+                        segment_index=ordered_result.segment_index,
+                        segment_start_sec=ordered_result.segment_start_sec,
+                        segment_end_sec=ordered_result.segment_end_sec,
+                        representative_frame_path=ordered_result.representative_frame_path,
+                        representative_frame_info=ordered_result.representative_frame_info,
+                        people_results=ordered_result.people_results,
+                    )
+                    processed_frames += ordered_result.processed_frames
+                    completed_segments += 1
+                    next_segment_index += 1
+
+                    self.realtime_event_service.emit_progress(
+                        session_id=session.session_id,
+                        source_type=source_type,
+                        current_time_sec=ordered_result.segment_end_sec,
+                        total_time_sec=total_time_sec,
+                        processed_frames=processed_frames,
+                        current_counts=ordered_result.current_counts,
+                    )
+                    ordered_result.people_results.clear()
+                    if ordered_result.representative_frame_info is not None:
+                        ordered_result.representative_frame_info.clear()
+                    ordered_result.current_counts.clear()
+        finally:
+            self.stop_event.set()
+            for worker in workers:
+                worker.join()
+            pending_results.clear()
+
+        return processed_frames
+
+    def _run_segment_worker(self, session_id: str, video_path: str, fps: float) -> None:
+        while not self.stop_event.is_set():
+            task = self.segment_tasks.get()
+            if task is None:
+                self.segment_tasks.task_done()
+                break
+
+            try:
+                result = self._process_segment(
+                    session_id=session_id,
+                    video_path=video_path,
+                    fps=fps,
+                    task=task,
+                )
+                self.segment_results.put(result)
+            except Exception as exc:
+                logger.exception(
+                    "[Segment] processing failed session_id=%s segment_index=%s",
+                    session_id,
+                    getattr(task, "segment_index", None),
+                )
+                self.segment_results.put(exc)
+            finally:
+                self.segment_tasks.task_done()
+
+    def _process_segment(
+        self,
+        session_id: str,
+        video_path: str,
+        fps: float,
+        task: VideoSegmentTask,
+    ) -> VideoSegmentResult:
+        segment_started_at = time.perf_counter()
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError("업로드한 영상 파일을 열 수 없습니다.")
+
+        aggregation = SegmentAggregationService(
+            best_frame_selector=BestFrameSelector(),
+            file_service=self.file_service,
+        )
+
+        sample_step = max(int(round(fps / self.analysis_fps)), 1)
+        person_states: dict[int, SegmentPersonState] = {}
+        next_local_person_id = 1
+        processed_frames = 0
+        ocr_request_count = 0
+
+        try:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, task.start_frame_index)
+            frame_index = task.start_frame_index
+
+            while frame_index < task.end_frame_index and not self.stop_event.is_set():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+
+                if (frame_index - task.start_frame_index) % sample_step != 0:
+                    frame_index += 1
+                    continue
+
+                frame_no = frame_index + 1
+                frame_time_sec = frame_no / fps if fps > 0 else 0.0
+                detected_people = self.yolo_pool.submit(frame).result()
+                people = self._assign_local_person_ids(
+                    detected_people=detected_people,
+                    person_states=person_states,
+                    next_local_person_id_ref=[next_local_person_id],
+                    frame_no=frame_no,
+                )
+                next_local_person_id = max([next_local_person_id] + [person.id + 1 for person in people])
+
+                ocr_jobs = []
+                for person in people:
+                    if not self._should_request_ocr(person):
+                        continue
+                    if not self.ocr_service.should_run_ocr_for_person(person, frame_time_sec):
+                        continue
+
+                    person.last_ocr_at_sec = frame_time_sec
+                    ocr_jobs.append((person, self.ocr_pool.submit(person.crop_image)))
+                    ocr_request_count += 1
+
+                for person, future in ocr_jobs:
+                    ocr_data = future.result()
+                    self.ocr_service.apply_ocr_result_to_person(person, ocr_data)
+                    state = person_states.get(person.id)
+                    if state is not None:
+                        self._sync_person_state(state, person)
+
+                aggregation.add_frame(
+                    session_id=session_id,
+                    segment_index=task.segment_index,
+                    frame_no=frame_no,
+                    frame_time_sec=frame_time_sec,
+                    frame=frame,
+                    people=people,
+                )
+                processed_frames += 1
+                frame_index += 1
+
+                for person in people:
+                    person.crop_image = None
+                del people
+                del detected_people
+                del frame
+
+            people_results = aggregation.build_people_results()
+            representative_frame_path = aggregation.get_representative_frame_path()
+            representative_frame_info = aggregation.get_representative_frame_info()
+            current_counts = {
+                "detected_person_count": len(people_results),
+                "confirmed_ocr_person_count": sum(
+                    1 for item in people_results if item.get("ocr_confirmed")
+                ),
+                "helmet_not_worn_count": sum(
+                    1 for item in people_results if item.get("helmet_status") != "WORN"
+                ),
+                "vest_not_worn_count": sum(
+                    1 for item in people_results if item.get("vest_status") != "WORN"
+                ),
+            }
+            logger.info(
+                "[Segment] processed session_id=%s segment_index=%s frames=%s people=%s ocr_requests=%s elapsed_sec=%.2f",
+                session_id,
+                task.segment_index,
+                processed_frames,
+                len(people_results),
+                ocr_request_count,
+                time.perf_counter() - segment_started_at,
+            )
+            return VideoSegmentResult(
+                segment_index=task.segment_index,
+                segment_start_sec=task.segment_start_sec,
+                segment_end_sec=task.segment_end_sec,
+                processed_frames=processed_frames,
+                people_results=people_results,
+                representative_frame_path=representative_frame_path,
+                representative_frame_info=representative_frame_info,
+                current_counts=current_counts,
+            )
+        finally:
+            cap.release()
+            person_states.clear()
+            aggregation.cleanup()
+            del aggregation
+            self._release_runtime_memory()
+
+    def _run_yolo_prediction(self, frame):
+        results = self.analyze_worker.run_inference_for_video(frame)
+        return list(results.values())
+
+    def _run_ocr_prediction(self, crop_image):
+        if crop_image is None or getattr(crop_image, "size", 0) == 0:
+            return None
+        return self.ocr_engine.extract_worker_id(crop_image)
+
+    def _assign_local_person_ids(
+        self,
+        detected_people: list,
+        person_states: dict[int, SegmentPersonState],
+        next_local_person_id_ref: list[int],
+        frame_no: int,
+    ) -> list:
+        assigned_people = []
+        used_state_ids: set[int] = set()
+
+        for person in sorted(
+            detected_people,
+            key=lambda item: float(item.get_bbox_area()) if hasattr(item, "get_bbox_area") else 0.0,
+            reverse=True,
+        ):
+            matched_state = self._find_best_state_match(
+                bbox=person.bbox,
+                person_states=person_states,
+                used_state_ids=used_state_ids,
+                frame_no=frame_no,
+            )
+
+            if matched_state is None:
+                matched_state = SegmentPersonState(
+                    local_id=next_local_person_id_ref[0],
+                    bbox=list(person.bbox),
+                    last_seen_frame_no=frame_no,
+                )
+                person_states[matched_state.local_id] = matched_state
+                next_local_person_id_ref[0] += 1
+
+            used_state_ids.add(matched_state.local_id)
+            matched_state.bbox = list(person.bbox)
+            matched_state.last_seen_frame_no = frame_no
+
+            person.id = matched_state.local_id
+            person.employee_no = matched_state.employee_no
+            person.ocr_confirmed = matched_state.ocr_confirmed
+            person.last_ocr_at_sec = matched_state.last_ocr_at_sec
+            person.ocr_candidate_counts = dict(matched_state.ocr_candidate_counts)
+            assigned_people.append(person)
+
+        return assigned_people
+
+    def _sync_person_state(self, state: SegmentPersonState, person) -> None:
+        state.employee_no = getattr(person, "employee_no", None)
+        state.ocr_confirmed = bool(getattr(person, "ocr_confirmed", False))
+        state.last_ocr_at_sec = getattr(person, "last_ocr_at_sec", None)
+        state.ocr_candidate_counts = dict(getattr(person, "ocr_candidate_counts", {}))
+
+    def _find_best_state_match(
+        self,
+        bbox: list[int],
+        person_states: dict[int, SegmentPersonState],
+        used_state_ids: set[int],
+        frame_no: int,
+    ) -> SegmentPersonState | None:
+        best_state = None
+        best_iou = 0.0
+
+        for state in person_states.values():
+            if state.local_id in used_state_ids:
+                continue
+            if (frame_no - state.last_seen_frame_no) > 2:
+                continue
+
+            iou = self._calculate_iou(bbox, state.bbox)
+            if iou >= 0.3 and iou > best_iou:
+                best_iou = iou
+                best_state = state
+
+        return best_state
+
+    def _build_segment_tasks(
+        self,
+        total_frames: int,
+        total_time_sec: float,
+        fps: float,
+    ) -> list[VideoSegmentTask]:
+        if total_frames <= 0 or fps <= 0:
+            return []
+
+        segment_count = max(
+            int(math.ceil(total_time_sec / self.segment_window_service.segment_seconds)),
+            1,
+        )
+        tasks = []
+        for segment_index in range(segment_count):
+            segment_start_sec = self.segment_window_service.get_segment_start_sec(segment_index)
+            segment_end_sec = self.segment_window_service.get_segment_end_sec(
+                segment_index=segment_index,
+                actual_end_sec=total_time_sec,
+            )
+            start_frame_index = min(int(segment_start_sec * fps), total_frames)
+            end_frame_index = min(int(math.ceil(segment_end_sec * fps)), total_frames)
+            if start_frame_index >= end_frame_index:
+                continue
+
+            tasks.append(
+                VideoSegmentTask(
+                    segment_index=segment_index,
+                    segment_start_sec=segment_start_sec,
+                    segment_end_sec=segment_end_sec,
+                    start_frame_index=start_frame_index,
+                    end_frame_index=end_frame_index,
+                )
+            )
+
+        return tasks
+
+    def _should_request_ocr(self, person) -> bool:
+        if getattr(person, "ocr_confirmed", False):
+            return False
+        if person.crop_image is None or getattr(person.crop_image, "size", 0) == 0:
+            return False
+        return bool(getattr(person, "has_vest", False) or person.get_bbox_area() >= 4000)
+
+    def _calculate_iou(self, bbox1: list[int], bbox2: list[int]) -> float:
+        x1 = max(bbox1[0], bbox2[0])
+        y1 = max(bbox1[1], bbox2[1])
+        x2 = min(bbox1[2], bbox2[2])
+        y2 = min(bbox1[3], bbox2[3])
+
+        intersection = max(0, x2 - x1) * max(0, y2 - y1)
+        if intersection <= 0:
+            return 0.0
+
+        area1 = max(0, bbox1[2] - bbox1[0]) * max(0, bbox1[3] - bbox1[1])
+        area2 = max(0, bbox2[2] - bbox2[0]) * max(0, bbox2[3] - bbox2[1])
+        union = area1 + area2 - intersection
+        if union <= 0:
+            return 0.0
+        return intersection / union
+
+    def _drain_queue(self, target_queue: queue.Queue) -> None:
+        while True:
+            try:
+                item = target_queue.get_nowait()
+            except queue.Empty:
+                break
+            target_queue.task_done()
+            if hasattr(item, "people_results"):
+                item.people_results.clear()
+            if hasattr(item, "representative_frame_info") and item.representative_frame_info is not None:
+                item.representative_frame_info.clear()
+
+    def _release_runtime_memory(self) -> None:
+        gc.collect()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass

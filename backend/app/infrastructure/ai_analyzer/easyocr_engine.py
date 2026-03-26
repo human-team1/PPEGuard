@@ -1,22 +1,17 @@
+import logging
 import math
 import re
+
 import cv2
 import easyocr
+
 from app.domain.ports.ocr_port import OCRPort
 
 
-# EasyOCR 기반 작업자 번호 추출 클래스
-class EasyOCREngine(OCRPort):
-    """
-    처리 흐름:
-    1) 조끼 crop 입력
-    2) 전처리: resize x2 방식
-    3) EasyOCR 수행
-    4) 후처리: 문자 치환 + 숫자만 추출
-    5) confidence가 가장 높은 후보 선택
-    """
+logger = logging.getLogger(__name__)
 
-    # EasyOCR 리더와 OCR 후보 선택 기준 초기화
+
+class EasyOCREngine(OCRPort):
     def __init__(
         self,
         languages=None,
@@ -32,7 +27,6 @@ class EasyOCREngine(OCRPort):
         self.max_length = max_length
         self.reader = easyocr.Reader(self.languages, gpu=self.gpu)
 
-    # 조끼 이미지에서 작업자 번호와 confidence를 함께 반환하는 함수
     def extract_worker_id(self, image):
         result = self.recognize(image)
         best = result.get("best_candidate")
@@ -47,7 +41,6 @@ class EasyOCREngine(OCRPort):
             "cleaned_text": best["cleaned_text"],
         }
 
-    # OCR 전체 결과와 최종 후보를 함께 반환하는 함수
     def recognize(self, image):
         if image is None:
             return {"raw_results": [], "best_candidate": None}
@@ -67,7 +60,6 @@ class EasyOCREngine(OCRPort):
             "best_candidate": best,
         }
 
-    # OCR 성능 향상을 위한 resize_x2 방식(입력 이미지 2배 확대) 전처리 함수
     def preprocess(self, image_bgr):
         return cv2.resize(
             image_bgr,
@@ -77,7 +69,6 @@ class EasyOCREngine(OCRPort):
             interpolation=cv2.INTER_CUBIC,
         )
 
-    # 전처리된 이미지에 EasyOCR를 적용하고 결과를 파싱하는 함수
     def run_easyocr(self, image):
         try:
             results = self.reader.readtext(image, detail=1)
@@ -98,11 +89,10 @@ class EasyOCREngine(OCRPort):
 
             return parsed
 
-        except Exception as e:
-            print(f"[EasyOCR 오류] {e}")
+        except Exception:
+            logger.exception("[OCR] easyocr execution failed")
             return []
 
-    # OCR 결과 중에서 confidence가 가장 높은 값을 반환하는 함수
     def select_best_candidate(self, parsed):
         valid = [
             x
@@ -117,7 +107,6 @@ class EasyOCREngine(OCRPort):
 
         return max(valid, key=lambda x: x["confidence"])
 
-    # OCR이 읽은 문자열에서 숫자 오인식을 보정하고 숫자만 남기는 텍스트 후처리 함수
     def clean_text(self, text):
         text = str(text).upper()
 
@@ -136,7 +125,6 @@ class EasyOCREngine(OCRPort):
         text = re.sub(r"[^0-9]", "", text)
         return text
 
-    # OCR bbox의 기울기를 계산해서 디버깅용 각도 정보를 반환하는 함수
     def get_angle_from_bbox(self, bbox):
         try:
             (x1, y1), (x2, y2), _, _ = bbox
