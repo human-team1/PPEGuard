@@ -12,6 +12,20 @@ from app.domain.entities.analysis_session import AnalysisSourceType
 
 class VideoAnalysisService:
     ALLOWED_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
+    
+    # (추가) 목적/이유: 동영상 분석 도중 사용자 요청에 의한 중단(Stop) 기능 지원을 위해 
+    # 클래스 레벨에서 중단된 세션 ID를 추적하기 위한 플래그 세트 도입.
+    _stopped_sessions = set()
+    # (추가) 목적/이유: 동기 블로킹 방식으로 인해 frontend가 세션 ID를 모르는 상태에서도 
+    # 현재 분석 중인 단일 세션을 중단할 수 있도록 최신 세션 ID를 추적함.
+    _current_processing_session = None
+
+    @classmethod
+    def stop_session(cls, session_id: str | None = None):
+        target_session = session_id or cls._current_processing_session
+        if target_session:
+            print(f"[VideoAnalysis] stop_session requested for {target_session}")
+            cls._stopped_sessions.add(target_session)
 
     def __init__(
         self,
@@ -25,6 +39,7 @@ class VideoAnalysisService:
         complete_analysis_session_usecase,
         get_analysis_session_usecase,
         fail_analysis_session_usecase,
+        session_repo,
     ):
         self.upload_dir = upload_dir
         self.crop_dir = crop_dir
@@ -36,6 +51,7 @@ class VideoAnalysisService:
         self.complete_analysis_session_usecase = complete_analysis_session_usecase
         self.get_analysis_session_usecase = get_analysis_session_usecase
         self.fail_analysis_session_usecase = fail_analysis_session_usecase
+        self.session_repo = session_repo
 
         self.frame_interval_sec = Config.FRAME_INTERVAL_SEC
         self.ocr_interval_sec = Config.OCR_INTERVAL_SEC
@@ -119,6 +135,9 @@ class VideoAnalysisService:
         )
         session = self.start_analysis_session_usecase.execute(start_cmd)
         session_id = session.session_id
+        
+        # (추가) 현재 처리 중인 세션 ID 등록하여 세션 ID를 모르는 프론트엔드에서도 중단 가능케 함
+        VideoAnalysisService._current_processing_session = session_id
 
         self.realtime_event_service.emit_session_status(
             session_id=session_id,
@@ -131,12 +150,22 @@ class VideoAnalysisService:
             status="processing",
         )
 
+
         try:
             current_frame_no = 0
             processed_frame_count = 0
             last_progress_emit_sec = -1.0
+            is_stopped_by_user = False
 
             while True:
+                # (추가) 목적/이유: 매 프레임 분석 직전 중단 요청 여부를 체크하여 
+                # 요청이 있을 경우 중단 플래그를 세팅 후 루프를 탈출(break)하기 위함.
+                if session_id in self._stopped_sessions:
+                    print(f"[VideoAnalysis] stop signal detected for session {session_id}. exiting loop.")
+                    is_stopped_by_user = True
+                    self._stopped_sessions.remove(session_id)
+                    break
+
                 ret, frame = cap.read()
                 if not ret:
                     break
@@ -188,12 +217,20 @@ class VideoAnalysisService:
                     last_progress_emit_sec = current_time_sec
 
             cap.release()
-            self.segment_result_service.finalize_session(session, reason="completed")
-
-            self.complete_analysis_session_usecase.execute(
-                session_id=session_id,
-                processed_frames=processed_frame_count,
-            )
+            
+            # (추가) 목적/이유: 사용자 요청에 의한 중단 시, 세션을 실패 상태로 전환할 뿐 아니라
+            # 요구사항에 명시된 대로 실제 프레임/세그먼트/추론 데이터를 DB에서 지움.
+            if is_stopped_by_user:
+                self.segment_result_service.finalize_session(session, reason="stopped")
+                self.fail_analysis_session_usecase.execute(session_id, "Analysis stopped by user")
+                self.session_repo.delete_session_data(session_id)
+            else:
+                # 정상 종료
+                self.segment_result_service.finalize_session(session, reason="completed")
+                self.complete_analysis_session_usecase.execute(
+                    session_id=session_id,
+                    processed_frames=processed_frame_count,
+                )
             self.realtime_event_service.emit_session_status(
                 session_id=session_id,
                 source_type=AnalysisSourceType.VIDEO_FILE.value,
@@ -201,6 +238,7 @@ class VideoAnalysisService:
             )
 
             updated_session = self.get_analysis_session_usecase.execute(session_id)
+            VideoAnalysisService._current_processing_session = None
             return updated_session
 
         except Exception as exc:
@@ -212,6 +250,7 @@ class VideoAnalysisService:
                 source_type=AnalysisSourceType.VIDEO_FILE.value,
                 status="failed",
             )
+            VideoAnalysisService._current_processing_session = None
             raise
 
     def _build_detection_payload(self, people: list) -> list[dict]:

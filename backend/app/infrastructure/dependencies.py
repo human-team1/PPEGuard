@@ -177,4 +177,5 @@ def build_video_analysis_service(
         complete_analysis_session_usecase=CompleteAnalysisSessionUseCase(get_session_repo()),
         get_analysis_session_usecase=GetAnalysisSessionUseCase(get_session_repo()),
         fail_analysis_session_usecase=FailAnalysisSessionUseCase(get_session_repo()),
+        session_repo=get_session_repo(),
     )

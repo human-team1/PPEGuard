@@ -17,6 +17,11 @@ class AnalysisSessionRepository(abc.ABC):
     def update(self, session: AnalysisSession):
         pass
 
+    @abc.abstractmethod
+    def delete_session_data(self, session_id: str):
+        """(추가) 목적/이유: 분석 중단 시 해당 세션과 연관된 대용량 데이터(프레임, 세그먼트, 추론 결과 등)를 삭제하기 위한 인터페이스 정의"""
+        pass
+
 class AnalysisFrameRepository(abc.ABC):
     @abc.abstractmethod
     def save(self, frame: AnalysisFrame):

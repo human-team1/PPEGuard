@@ -66,6 +66,18 @@ class ApiClient:
         except requests.exceptions.RequestException as e:
             self._handle_request_error(e, "분석 종료 요청에 실패했습니다.")
 
+        # (추가) 목적/이유: 동영상 분석 세션에 대해 백엔드의 /api/v1/video/stop API를 호출
+    def stop_video_analysis(self, session_id: str | None = None) -> Dict[str, Any]:
+        url = f"{self.base_url}/api/v1/video/stop"
+        try:
+            payload = {"session_id": session_id} if session_id else {}
+            response = requests.post(url, json=payload, timeout=5)
+
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            self._handle_request_error(e, "동영상 분석 중단 요청에 실패했습니다.")
+
     def upload_video(self, video_path: str, video_started_at: str = None) -> Dict[str, Any]:
         url = f"{self.base_url}/api/v1/video"
         if not os.path.exists(video_path):
