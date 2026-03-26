@@ -183,10 +183,18 @@ class MainWindow(QMainWindow):
         self.stop_worker = None
 
     def closeEvent(self, event):
+        if hasattr(self, "result_view"):
+            self.result_view.begin_shutdown()
         if self.session_worker and self.session_worker.isRunning():
             self.session_worker.wait(2000)
         if self.stop_worker and self.stop_worker.isRunning():
             self.stop_worker.wait(2000)
+        if (
+            hasattr(self, "result_view")
+            and self.result_view.list_worker
+            and self.result_view.list_worker.isRunning()
+        ):
+            self.result_view.list_worker.wait(2000)
 
         if hasattr(self, "result_view"):
             self.result_view.socket_service.disconnect_server()

@@ -121,7 +121,11 @@ class InputSelectionWidget(QGroupBox):
         self.time_edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
         self.time_edit.setCalendarPopup(True)
         self.time_edit.setEnabled(False)
-        self.time_edit.setToolTip("미입력 시 서버 현재 시각을 사용합니다.")
+        self.time_edit.setReadOnly(False)
+        self.time_edit.setToolTip(
+            "날짜는 달력으로 선택하고, 시간은 시/분/초를 직접 입력할 수 있습니다. "
+            "직접 입력하지 않으면 서버 현재 시각이 사용될 수 있습니다."
+        )
         layout.addWidget(self.time_edit)
 
         self.webcam_preview = WebcamPreviewWidget()
@@ -208,12 +212,24 @@ class InputSelectionWidget(QGroupBox):
             self.webcam_preview.hide()
             self.file_picker_widget.show()
             self.time_checkbox.setEnabled(True)
+            should_enable_time_edit = self.time_checkbox.isChecked()
+            self.time_edit.setEnabled(should_enable_time_edit)
+            self.time_edit.setReadOnly(False)
         else:
             self.file_picker_widget.hide()
             self.webcam_preview.hide()
             self.webcam_preview.start_camera(camera_id=0)
             self.time_checkbox.setEnabled(False)
             self.time_edit.setEnabled(False)
+            self.time_edit.setReadOnly(False)
+        print(
+            "[InputSelection] mode changed - "
+            f"mode={'FILE' if self.radio_file.isChecked() else 'WEBCAM'}, "
+            f"checkbox_enabled={self.time_checkbox.isEnabled()}, "
+            f"checkbox_checked={self.time_checkbox.isChecked()}, "
+            f"time_edit_enabled={self.time_edit.isEnabled()}",
+            flush=True,
+        )
         self.set_analysis_state(self.current_state)
 
     def _select_file(self):
@@ -240,7 +256,19 @@ class InputSelectionWidget(QGroupBox):
         self.set_analysis_state(self.current_state)
 
     def _on_time_checkbox_changed(self, state):
-        self.time_edit.setEnabled(state == Qt.Checked)
+        should_enable_time_edit = (
+            self.radio_file.isChecked() and self.time_checkbox.isChecked()
+        )
+        self.time_edit.setEnabled(should_enable_time_edit)
+        self.time_edit.setReadOnly(False)
+        print(
+            "[InputSelection] time checkbox changed - "
+            f"state={state}, "
+            f"mode={'FILE' if self.radio_file.isChecked() else 'WEBCAM'}, "
+            f"checkbox_checked={self.time_checkbox.isChecked()}, "
+            f"time_edit_enabled={self.time_edit.isEnabled()}",
+            flush=True,
+        )
 
     def _on_start_clicked(self):
         if not self.is_server_connected:
@@ -248,6 +276,20 @@ class InputSelectionWidget(QGroupBox):
             return
 
         if self.radio_file.isChecked():
+            if self.time_checkbox.isChecked() and not self.time_edit.isEnabled():
+                QMessageBox.warning(
+                    self,
+                    "경고",
+                    "영상 시작 시각 직접 입력이 선택되었지만 시간 입력창이 비활성화되어 있습니다. 모드를 다시 확인해주세요.",
+                )
+                print(
+                    "[InputSelection] blocked start - "
+                    "mode=FILE, "
+                    f"checkbox_checked={self.time_checkbox.isChecked()}, "
+                    f"time_edit_enabled={self.time_edit.isEnabled()}",
+                    flush=True,
+                )
+                return
             video_started_at = None
             if self.time_checkbox.isChecked():
                 video_started_at = self.time_edit.dateTime().toString("yyyy-MM-ddTHH:mm:ss")

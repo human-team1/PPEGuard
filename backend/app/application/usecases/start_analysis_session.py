@@ -36,7 +36,7 @@ class StartAnalysisSessionUseCase:
             total_frames=cmd.total_frames,
             requested_by=cmd.requested_by,
             started_at=started_at,
-            video_started_at=cmd.video_started_at or now,
+            video_started_at=cmd.video_started_at,
         )
         self.session_repo.save(session)
         return session
