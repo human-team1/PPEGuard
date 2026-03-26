@@ -163,7 +163,21 @@ class VideoAnalysisService:
         # (추가) 현재 처리 중인 세션 ID 등록하여 세션 ID를 모르는 프론트엔드에서도 중단 가능케 함
         VideoAnalysisService._current_processing_session = session_id
 
+        # (복구) 프론트엔드 모니터 뷰가 상태를 인지하게 이벤트 발송
+        self.realtime_event_service.emit_session_status(
+            session_id=session_id,
+            source_type=AnalysisSourceType.VIDEO_FILE.value,
+            status="started",
+        )
+        self.realtime_event_service.emit_session_status(
+            session_id=session_id,
+            source_type=AnalysisSourceType.VIDEO_FILE.value,
+            status="processing",
+        )
+
         try:
+
+
             pipeline = VideoSegmentPipelineService(
                 analyze_worker=self.analyze_worker,
                 ocr_engine=self.ocr_engine,
@@ -207,8 +221,17 @@ class VideoAnalysisService:
                 session_id=session_id,
                 processed_frames=processed_frame_count,
             )
+
+            # (복구) 세션 완료 상태 알림 통지
+            self.realtime_event_service.emit_session_status(
+                session_id=session_id,
+                source_type=AnalysisSourceType.VIDEO_FILE.value,
+                status="completed",
+            )
+
             logger.info(
-                "[AnalysisSession] completed session_id=%s processed_frames=%s elapsed_sec=%.2f",
+
+                "[AnalysisSession] complete session_id=%s frames=%s elapsed=%.1fs",
                 session_id,
                 processed_frame_count,
                 time.perf_counter() - started_at,
@@ -220,4 +243,15 @@ class VideoAnalysisService:
         except Exception as exc:
             logger.exception("[AnalysisSession] failed session_id=%s", session_id)
             self.fail_analysis_session_usecase.execute(session_id, str(exc))
+
+            # (복구) 에러 발생 시 프론트엔드 상태 변경
+            self.realtime_event_service.emit_session_status(
+                session_id=session_id,
+                source_type=AnalysisSourceType.VIDEO_FILE.value,
+                status="failed",
+            )
+            VideoAnalysisService._current_processing_session = None
+
             raise
+
+

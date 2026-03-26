@@ -243,7 +243,18 @@ class VideoSegmentPipelineService:
                     completed_segments += 1
                     next_segment_index += 1
 
+                    # (복구) 프론트엔드 진행률 게이지 업데이트
+                    self.realtime_event_service.emit_progress(
+                        session_id=session.session_id,
+                        source_type=source_type,
+                        current_time_sec=ordered_result.segment_end_sec,
+                        total_time_sec=total_time_sec,
+                        processed_frames=processed_frames,
+                        current_counts=ordered_result.current_counts,
+                    )
+
                     ordered_result.people_results.clear()
+
                     if ordered_result.representative_frame_info is not None:
                         ordered_result.representative_frame_info.clear()
                     ordered_result.current_counts.clear()

@@ -137,9 +137,9 @@ class ResultView(QWidget):
 
 
         self.live_monitor = AnalysisLiveMonitorWidget(self)
-        # 모니터 위젯의 기본 최소 높이를 주어 스크롤이 자연스럽게 생기도록 할 수 있습니다.
-        self.live_monitor.setMinimumHeight(200)
         content_layout.addWidget(self.live_monitor)
+
+
 
         self.empty_label = QLabel(
             "세션 시작 전입니다. 분석을 시작하면 저장된 세그먼트 결과가 여기에 표시됩니다.",
