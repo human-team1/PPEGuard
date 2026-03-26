@@ -197,9 +197,23 @@ class VideoAnalysisService:
                     total_frames=total_frames,
                     total_time_sec=total_time_sec,
                     source_type=AnalysisSourceType.VIDEO_FILE.value,
+                    stop_signal=lambda: session_id in VideoAnalysisService._stopped_sessions,
                 )
             finally:
                 pipeline.close()
+
+            # (추가) 목적/이유: 사용자 요청에 의한 중단 시 실제 프레임/세그먼트/추론 데이터를 DB에서 지움.
+            if processed_frame_count is None:
+                VideoAnalysisService._stopped_sessions.discard(session_id)
+                self.fail_analysis_session_usecase.execute(session_id, "Analysis stopped by user")
+                self.session_repo.delete_session_data(session_id)
+                self.realtime_event_service.emit_session_status(
+                    session_id=session_id,
+                    source_type=AnalysisSourceType.VIDEO_FILE.value,
+                    status="stopped",
+                )
+                VideoAnalysisService._current_processing_session = None
+                return self.get_analysis_session_usecase.execute(session_id)
 
             self.complete_analysis_session_usecase.execute(
                 session_id=session_id,

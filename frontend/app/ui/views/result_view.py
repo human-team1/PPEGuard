@@ -10,12 +10,14 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QTableWidget,
     QTableWidgetItem,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
+
 
 from app.config.result_dashboard_config import (
     NORMAL_INCLUDED_FILTER_OPTIONS,
@@ -65,13 +67,23 @@ class ResultView(QWidget):
 
     def _init_ui(self):
         root_layout = QVBoxLayout(self)
-        root_layout.setSpacing(10)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+
+        # (추가) 목적/이유: 화면 크기 제약 시 우측 패널 전체를 스크롤 할 수 있도록 QScrollArea 도입
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QScrollArea.NoFrame)
+        
+        scroll_content = QWidget()
+        content_layout = QVBoxLayout(scroll_content)
+        content_layout.setSpacing(10)
 
         title_layout = QHBoxLayout()
         title = QLabel("세션 결과 화면")
         title.setStyleSheet("font-size: 16px; font-weight: bold;")
         title_layout.addWidget(title)
         title_layout.addStretch()
+
 
         self.column_menu_button = QToolButton()
         self.column_menu_button.setText("컬럼 선택")
@@ -82,7 +94,8 @@ class ResultView(QWidget):
         self.refresh_btn = QPushButton("결과 새로고침")
         self.refresh_btn.clicked.connect(lambda: self.load_results(reason="manual"))
         title_layout.addWidget(self.refresh_btn)
-        root_layout.addLayout(title_layout)
+        content_layout.addLayout(title_layout)
+
 
         self.filter_bar = QWidget(self)
         filter_layout = QHBoxLayout(self.filter_bar)
@@ -120,17 +133,21 @@ class ResultView(QWidget):
             self.normal_included_combo.addItem(option["label"], option["key"])
         self.normal_included_combo.currentIndexChanged.connect(self._apply_cached_dashboard)
         filter_layout.addWidget(self.normal_included_combo)
-        root_layout.addWidget(self.filter_bar)
+        content_layout.addWidget(self.filter_bar)
+
 
         self.live_monitor = AnalysisLiveMonitorWidget(self)
-        root_layout.addWidget(self.live_monitor)
+        # 모니터 위젯의 기본 최소 높이를 주어 스크롤이 자연스럽게 생기도록 할 수 있습니다.
+        self.live_monitor.setMinimumHeight(200)
+        content_layout.addWidget(self.live_monitor)
 
         self.empty_label = QLabel(
             "세션 시작 전입니다. 분석을 시작하면 저장된 세그먼트 결과가 여기에 표시됩니다.",
             self,
         )
         self.empty_label.setStyleSheet("font-size: 13px; color: #666; padding: 16px;")
-        root_layout.addWidget(self.empty_label)
+        content_layout.addWidget(self.empty_label)
+
 
         self.dashboard_container = QWidget(self)
         dashboard_layout = QVBoxLayout(self.dashboard_container)
@@ -149,10 +166,18 @@ class ResultView(QWidget):
         )
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table.setAlternatingRowColors(True)
+        # 테이블의 스크롤과 자체 스크롤이 이중으로 생기지 않게 최소 높이 지정
+        self.table.setMinimumHeight(400)
         dashboard_layout.addWidget(self.table, stretch=1)
 
-        root_layout.addWidget(self.dashboard_container, stretch=1)
+        content_layout.addWidget(self.dashboard_container, stretch=1)
+        
+        # (추가) scroll_area에 content를 연결 후 root에 추가
+        scroll_area.setWidget(scroll_content)
+        root_layout.addWidget(scroll_area)
+        
         self._apply_column_visibility()
+
 
     def _connect_live_events(self):
         self.socket_service.analysis_session_status_changed.connect(

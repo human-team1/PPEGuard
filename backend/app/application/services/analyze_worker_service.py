@@ -38,8 +38,8 @@ class AnalyzeWorker:
         return self._build_persons(frame, raw_persons, raw_vests, raw_helmets, keep_active=True)
 
     def run_inference_for_video(self, frame: Any) -> Dict[int, Person]:
-        raw_persons, raw_vests, raw_helmets = self.detector.detect(frame)
-        return self._build_persons(frame, raw_persons, raw_vests, raw_helmets, keep_active=False)
+        raw_persons, raw_vests, raw_helmets = self.detector.track(frame)
+        return self._build_persons(frame, raw_persons, raw_vests, raw_helmets, keep_active=True)
 
     def _build_persons(
         self,

@@ -170,7 +170,8 @@ class VideoSegmentPipelineService:
         total_frames: int,
         total_time_sec: float,
         source_type: str,
-    ) -> int:
+        stop_signal = None,
+    ) -> int | None:
         tasks = self._build_segment_tasks(total_frames=total_frames, total_time_sec=total_time_sec, fps=fps)
         if not tasks:
             return 0
@@ -210,7 +211,18 @@ class VideoSegmentPipelineService:
 
         try:
             while completed_segments < len(tasks):
-                result = self.segment_results.get()
+                # (추가) 목적/이유: 외부의 중단 시그널(예: UI '분석 중지' 클릭)을 
+                # 감지하여 워커들에게 종료를 지시하고 루프를 빠져나옴.
+                if stop_signal and stop_signal():
+                    logger.info("[VideoPipeline] Stop signal received for session=%s", session.session_id)
+                    self.stop_event.set()
+                    return None
+
+                try:
+                    result = self.segment_results.get(timeout=1.0)
+                except queue.Empty:
+                    continue
+
                 if isinstance(result, Exception):
                     self.stop_event.set()
                     raise result
