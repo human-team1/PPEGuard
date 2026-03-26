@@ -222,7 +222,7 @@ class SegmentAggregationService:
     def _get_segment_wear_status(self, detected_frames: int, observed_frames: int) -> SegmentWearStatus:
         if observed_frames <= 0:
             return SegmentWearStatus.UNKNOWN
-        if (detected_frames / observed_frames) >= 0.5:
+        if detected_frames > 0:
             return SegmentWearStatus.WORN
         return SegmentWearStatus.NOT_WORN
 

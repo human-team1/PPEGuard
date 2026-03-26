@@ -163,7 +163,11 @@ class SegmentDetailWidget(QFrame):
 
     @staticmethod
     def _segment_status(person: dict, field_name: str) -> str:
-        return person.get(field_name) or "UNKNOWN"
+        return (
+            person.get(f"session_final_{field_name}")
+            or person.get(field_name)
+            or "UNKNOWN"
+        )
 
     @staticmethod
     def _resolve_frame_path(frame_path: str) -> str | None:
