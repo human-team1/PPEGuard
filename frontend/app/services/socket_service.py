@@ -1,5 +1,5 @@
 import base64
-import time
+import logging
 
 import cv2
 import numpy as np
@@ -7,8 +7,10 @@ import socketio
 from PySide6.QtCore import QObject, Signal
 
 
+logger = logging.getLogger(__name__)
+
+
 class SocketService(QObject):
-    results_ready = Signal(dict)
     analysis_progress_ready = Signal(dict)
     analysis_frame_result_ready = Signal(dict)
     analysis_segment_saved = Signal(dict)
@@ -21,45 +23,50 @@ class SocketService(QObject):
         super().__init__()
         self.server_url = server_url
         self.sio = socketio.Client(logger=False, engineio_logger=False)
-        self.is_busy = False
         self.session_id = None
         self.streaming_enabled = False
-        self._last_log_at = 0.0
         self._setup_handlers()
 
     def _setup_handlers(self):
         @self.sio.on("connect")
         def on_connect():
-            print(f"[FRONT] socket connected - url={self.server_url}", flush=True)
+            logger.info("[Socket] connected url=%s", self.server_url)
             self.connected.emit()
 
         @self.sio.on("disconnect")
         def on_disconnect():
-            print("[FRONT] socket disconnected", flush=True)
-            self.is_busy = False
+            logger.info("[Socket] disconnected")
             self.disconnected.emit()
-
-        @self.sio.on("results")
-        def on_results(data):
-            self.is_busy = False
-            self.results_ready.emit(data)
 
         @self.sio.on("analysis_progress")
         def on_analysis_progress(data):
+            logger.debug("[Socket] analysis_progress received session_id=%s", data.get("session_id"))
             self.analysis_progress_ready.emit(data)
 
         @self.sio.on("analysis_frame_result")
         def on_analysis_frame_result(data):
+            logger.debug(
+                "[Socket] analysis_frame_result received session_id=%s detections=%s",
+                data.get("session_id"),
+                len(data.get("detections", [])),
+            )
             self.analysis_frame_result_ready.emit(data)
+
+        @self.sio.on("analysis_track_confirmed")
+        def on_analysis_track_confirmed(data):
+            logger.info(
+                "[OCR] confirmed track_id=%s employee_no=%s",
+                data.get("track_id"),
+                data.get("employee_id"),
+            )
 
         @self.sio.on("analysis_segment_saved")
         def on_analysis_segment_saved(data):
-            print(
-                "[FRONT] analysis_segment_saved received - "
-                f"session_id={data.get('session_id')}, "
-                f"segment_index={data.get('segment_index')}, "
-                f"people={len(data.get('person_results', []))}",
-                flush=True,
+            logger.info(
+                "[Segment] saved session_id=%s segment_index=%s people=%s",
+                data.get("session_id"),
+                data.get("segment_index"),
+                len(data.get("person_results", [])),
             )
             self.analysis_segment_saved.emit(data)
 
@@ -69,9 +76,8 @@ class SocketService(QObject):
 
         @self.sio.on("error")
         def on_error(data):
-            self.is_busy = False
             message = data.get("message", "알 수 없는 오류")
-            print(f"[FRONT][ERROR] socket server error: {message}", flush=True)
+            logger.error("[Socket] server error message=%s", message)
             self.error_occurred.emit(message)
 
     def ensure_connected(self):
@@ -82,56 +88,43 @@ class SocketService(QObject):
             if self.sio.connected:
                 return True
 
-            print(f"[FRONT] socket connecting - url={self.server_url}", flush=True)
+            logger.info("[Socket] connecting url=%s", self.server_url)
             self.sio.connect(self.server_url, transports=["websocket", "polling"])
             return self.sio.connected
         except Exception as e:
-            print(f"[FRONT][ERROR] socket connect failed: {e}", flush=True)
+            logger.exception("[Socket] connect failed url=%s", self.server_url)
             self.error_occurred.emit(f"서버 연결 실패: {str(e)}")
             return False
 
     def disconnect_server(self):
         self.streaming_enabled = False
         self.session_id = None
-        self.is_busy = False
         if self.sio.connected:
-            print("[FRONT] socket disconnect requested", flush=True)
+            logger.info("[Socket] disconnect requested")
             self.sio.disconnect()
 
     def start_streaming(self, session_id: str):
         self.session_id = session_id
         self.streaming_enabled = True
         connected = self.connect_server()
-        print(
-            f"[FRONT] webcam session started - session_id={session_id}, connected={connected}",
-            flush=True,
+        logger.info(
+            "[AnalysisSession] started session_id=%s source=webcam connected=%s",
+            session_id,
+            connected,
         )
 
     def stop_streaming(self):
         if self.streaming_enabled or self.session_id:
-            print(
-                f"[FRONT] webcam streaming stopped - session_id={self.session_id}",
-                flush=True,
-            )
+            logger.info("[AnalysisSession] stopped session_id=%s source=webcam", self.session_id)
         self.streaming_enabled = False
         self.session_id = None
-        self.is_busy = False
 
     def send_frame(self, frame_np: np.ndarray):
-        now = time.time()
-        if now - self._last_log_at >= 1.0:
-            print(
-                f"[FRONT] webcam frame captured - connected={self.sio.connected}, "
-                f"streaming={self.streaming_enabled}, session_id={self.session_id}",
-                flush=True,
-            )
-            self._last_log_at = now
-
         if not self.streaming_enabled:
             return
 
         if not self.session_id:
-            print("[FRONT][ERROR] frame send skipped: session_id missing", flush=True)
+            logger.warning("[Webcam] frame send skipped missing_session_id")
             return
 
         if not self.sio.connected:
@@ -139,16 +132,7 @@ class SocketService(QObject):
             if not connected:
                 return
 
-        if self.is_busy:
-            return
-
         try:
-            self.is_busy = True
-            print(
-                f"[FRONT] webcam frame sending - session_id={self.session_id}",
-                flush=True,
-            )
-
             h, w = frame_np.shape[:2]
             target_width = 640
             if w > target_width:
@@ -165,11 +149,6 @@ class SocketService(QObject):
                     "session_id": self.session_id,
                 },
             )
-            print(
-                f"[FRONT] webcam frame sent - session_id={self.session_id}",
-                flush=True,
-            )
         except Exception as e:
-            self.is_busy = False
-            print(f"[FRONT][ERROR] frame send failed: {e}", flush=True)
+            logger.exception("[Webcam] frame send failed session_id=%s", self.session_id)
             self.error_occurred.emit(f"프레임 전송 실패: {str(e)}")

@@ -1,3 +1,5 @@
+import logging
+
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QComboBox,
@@ -27,6 +29,9 @@ from app.services.socket_service import SocketService
 from app.ui.widgets.analysis_live_monitor_widget import AnalysisLiveMonitorWidget
 from app.ui.widgets.dashboard_bar_chart_widget import DashboardBarChartWidget
 from app.utils.async_task import ApiWorker
+
+
+logger = logging.getLogger(__name__)
 
 
 class ResultView(QWidget):
@@ -206,13 +211,13 @@ class ResultView(QWidget):
 
         self.pending_reload = False
         self.refresh_btn.setEnabled(False)
-        self.refresh_btn.setText("불러오는 중...")
+        self.refresh_btn.setText("불러오는 중..")
         timeout_sec = 15 if self._is_processing_video_session() else 5
-        print(
-            "[ResultView] load_results called - "
-            f"reason={reason}, session_id={self.current_session_id}, "
-            f"status={self.current_analysis_status}, timeout={timeout_sec}s",
-            flush=True,
+        logger.debug(
+            "[ResultView] load_results reason=%s session_id=%s timeout=%s",
+            reason,
+            self.current_session_id,
+            timeout_sec,
         )
         self.list_worker = ApiWorker(
             self.api_client.get_session_segments,
@@ -227,12 +232,6 @@ class ResultView(QWidget):
     def _on_dashboard_loaded(self, raw_data: dict):
         self.refresh_btn.setEnabled(True)
         self.refresh_btn.setText("결과 새로고침")
-        print(
-            "[ResultView] segments loaded - "
-            f"session_id={raw_data.get('session_id')}, "
-            f"segments={len(raw_data.get('segments', []))}",
-            flush=True,
-        )
         self.live_monitor.sync_from_segments_response(raw_data)
         self.current_dashboard = SessionDashboardDto.from_segments_api(
             raw_data,
@@ -244,15 +243,15 @@ class ResultView(QWidget):
         self.refresh_btn.setEnabled(True)
         self.refresh_btn.setText("결과 새로고침")
         if self._should_suppress_results_error(err_msg):
-            print(
-                "[ResultView] load_results timeout suppressed - "
-                f"session_id={self.current_session_id}, status={self.current_analysis_status}",
-                flush=True,
+            logger.debug(
+                "[ResultView] results timeout suppressed session_id=%s status=%s",
+                self.current_session_id,
+                self.current_analysis_status,
             )
             if self.current_dashboard is None:
                 self._set_dashboard_visible(False)
                 self.empty_label.setVisible(True)
-            self.empty_label.setText("결과 준비 중입니다. 자동 재시도 중입니다.")
+            self.empty_label.setText("결과 준비 중입니다. 자동 갱신 중입니다.")
             return
         QMessageBox.warning(self, "세션 결과 조회 오류", err_msg)
 
@@ -377,27 +376,13 @@ class ResultView(QWidget):
 
     def _sync_segments_fallback(self):
         if not self.has_received_segment_saved:
-            print(
-                "[ResultView] fallback sync skipped - waiting first segment",
-                flush=True,
-            )
             return
         if self.current_session_id and not (self.list_worker and self.list_worker.isRunning()):
-            print(
-                f"[ResultView] fallback sync triggered - session_id={self.current_session_id}",
-                flush=True,
-            )
             self.load_results(reason="fallback")
 
     def _on_analysis_session_status(self, payload: dict):
         source_type = payload.get("source_type")
         session_id = payload.get("session_id")
-
-        print(
-            "[ResultView] analysis_session_status received - "
-            f"source_type={source_type}, session_id={session_id}, status={payload.get('status')}",
-            flush=True,
-        )
         self.live_monitor.handle_session_status(payload)
         if not self.current_session_id and self.pending_source_type == source_type:
             self.set_session_id(session_id)
@@ -413,12 +398,6 @@ class ResultView(QWidget):
             self.load_results(reason=f"session_status:{status}")
 
     def _on_analysis_segment_saved(self, payload: dict):
-        print(
-            "[ResultView] analysis_segment_saved forwarded - "
-            f"session_id={payload.get('session_id')}, "
-            f"segment_index={payload.get('segment_index')}",
-            flush=True,
-        )
         self.live_monitor.handle_segment_saved(payload)
         if payload.get("session_id") == self.current_session_id:
             self.has_received_segment_saved = True

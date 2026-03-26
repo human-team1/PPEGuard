@@ -11,6 +11,10 @@ video_bp = Blueprint("video", __name__, url_prefix="/api/v1/video")
 
 @video_bp.route("", methods=["POST"])
 def upload_video():
+    """
+    `frame_interval_sec` is accepted only for backward compatibility.
+    Actual video sampling is controlled by backend `ANALYSIS_FPS`.
+    """
     try:
         video_file = request.files.get("file")
         requested_by = request.form.get("requested_by", "desktop-client")

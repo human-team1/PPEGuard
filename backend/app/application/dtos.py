@@ -110,6 +110,7 @@ class AnalyzeFrameCommand:
 @dataclass
 class AnalysisSegmentPersonResultResponseDto:
     person_result_id: int
+    local_person_id: int
     track_id: int
     employee_id: Optional[str]
     ocr_number: Optional[str]

@@ -7,6 +7,8 @@ from app.application.services.segment_persistence_service import SegmentPersiste
 from app.application.services.segment_result_service import SegmentResultService
 from app.application.services.video_analysis_file_service import VideoAnalysisFileService
 from app.application.services.video_analysis_service import VideoAnalysisService
+from app.application.services.webcam_realtime_pipeline_service import WebcamPipelineManager
+from app.application.services.video_analysis_ocr_service import VideoAnalysisOcrService
 from app.application.usecases.complete_analysis_session import CompleteAnalysisSessionUseCase
 from app.application.usecases.fail_analysis_session import FailAnalysisSessionUseCase
 from app.application.usecases.get_analysis_session import GetAnalysisSessionUseCase
@@ -136,6 +138,7 @@ def build_segment_result_service(
     realtime_event_service=None,
     upload_dir: str | None = None,
     crop_dir: str | None = None,
+    segment_seconds: float | None = None,
 ):
     upload_dir = upload_dir or build_upload_paths()[0]
     crop_dir = crop_dir or build_upload_paths()[1]
@@ -150,6 +153,51 @@ def build_segment_result_service(
             segment_person_result_repo=get_segment_person_result_repo(),
             realtime_event_service=realtime_service,
         ),
+        segment_seconds=segment_seconds,
+    )
+
+
+def build_webcam_pipeline_manager(
+    model_path: str,
+    tracker_config: str,
+    realtime_event_service=None,
+    upload_dir: str | None = None,
+    crop_dir: str | None = None,
+):
+    realtime_service = realtime_event_service or build_realtime_event_service()
+    ocr_service = VideoAnalysisOcrService(
+        ocr_interval_sec=Config.OCR_INTERVAL_SEC,
+        employee_no_regex=Config.EMPLOYEE_NO_REGEX,
+        employee_number_min_confirm_count=Config.EMPLOYEE_NUMBER_MIN_CONFIRM_COUNT,
+        employee_no_min_length=Config.EMPLOYEE_NO_MIN_LENGTH,
+        employee_no_max_length=Config.EMPLOYEE_NO_MAX_LENGTH,
+    )
+    return WebcamPipelineManager(
+        analyze_worker_factory=lambda: AnalyzeWorker(
+            build_detector(model_path, tracker_config)
+        ),
+        ocr_engine=build_ocr_engine(),
+        ocr_service=ocr_service,
+        session_repo=get_session_repo(),
+        segment_result_service=build_segment_result_service(
+            realtime_event_service=realtime_service,
+            upload_dir=upload_dir,
+            crop_dir=crop_dir,
+            segment_seconds=Config.WEBCAM_RESULT_WINDOW_SECONDS,
+        ),
+        realtime_event_service=realtime_service,
+        capture_fps=Config.WEBCAM_CAPTURE_FPS,
+        analysis_fps=Config.WEBCAM_ANALYSIS_FPS,
+        frame_queue_size=Config.WEBCAM_FRAME_QUEUE_SIZE,
+        event_queue_size=Config.WEBCAM_EVENT_QUEUE_SIZE,
+        result_window_seconds=Config.WEBCAM_RESULT_WINDOW_SECONDS,
+        result_ttl_seconds=Config.SEGMENT_RESULT_TTL_SECONDS,
+        track_expiry_seconds=Config.WEBCAM_TRACK_EXPIRY_SECONDS,
+        max_track_ocr_count=Config.WEBCAM_MAX_TRACK_OCR_COUNT,
+        yolo_worker_count=Config.YOLO_WORKER_COUNT,
+        ocr_worker_count=Config.OCR_WORKER_COUNT,
+        yolo_queue_size=Config.YOLO_QUEUE_SIZE,
+        ocr_queue_size=Config.OCR_QUEUE_SIZE,
     )
 
 

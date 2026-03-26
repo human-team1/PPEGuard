@@ -1,13 +1,18 @@
+import logging
+
 from app.application.services.best_frame_selector import BestFrameSelector
 from app.application.services.segment_aggregation_service import SegmentAggregationService
 from app.application.services.segment_window_service import SegmentWindowService
 
 
+logger = logging.getLogger(__name__)
+
+
 class SegmentResultService:
-    def __init__(self, file_service, persistence_service):
+    def __init__(self, file_service, persistence_service, segment_seconds: float | None = None):
         self.file_service = file_service
         self.persistence_service = persistence_service
-        self.window_service = SegmentWindowService()
+        self.window_service = SegmentWindowService(segment_seconds=segment_seconds)
         self.best_frame_selector = BestFrameSelector()
         self.sessions: dict[str, dict] = {}
 
@@ -41,10 +46,7 @@ class SegmentResultService:
     def finalize_session(self, session, reason: str = "finalize") -> None:
         state = self.sessions.get(session.session_id)
         if not state:
-            print(
-                f"[Segment] finalize skipped - no active state, session_id={session.session_id}",
-                flush=True,
-            )
+            logger.debug("[Segment] finalize skipped no_state session_id=%s", session.session_id)
             return
 
         self._flush_current_segment(
@@ -53,6 +55,7 @@ class SegmentResultService:
             actual_end_sec=state["last_frame_time_sec"],
             reason=reason,
         )
+        self._cleanup_state(state)
         self.sessions.pop(session.session_id, None)
 
     def _flush_current_segment(
@@ -66,20 +69,23 @@ class SegmentResultService:
         if segment_index is None:
             return
         if state["last_flushed_segment_index"] == segment_index:
-            print(
-                f"[Segment] flush skipped - already flushed, session_id={session.session_id}, "
-                f"segment_index={segment_index}, reason={reason}",
-                flush=True,
+            logger.debug(
+                "[Segment] flush skipped already_flushed session_id=%s segment_index=%s reason=%s",
+                session.session_id,
+                segment_index,
+                reason,
             )
             return
 
         people_results = state["aggregation"].build_people_results()
         representative_frame_path = state["aggregation"].get_representative_frame_path()
+        representative_frame_info = state["aggregation"].get_representative_frame_info()
         if not people_results and not representative_frame_path:
-            print(
-                f"[Segment] flush skipped - empty aggregation, session_id={session.session_id}, "
-                f"segment_index={segment_index}, reason={reason}",
-                flush=True,
+            logger.debug(
+                "[Segment] flush skipped empty session_id=%s segment_index=%s reason=%s",
+                session.session_id,
+                segment_index,
+                reason,
             )
             return
 
@@ -88,11 +94,13 @@ class SegmentResultService:
             segment_index=segment_index,
             actual_end_sec=actual_end_sec,
         )
-        print(
-            f"[Segment] segment flush triggered - session_id={session.session_id}, "
-            f"segment_index={segment_index}, start={segment_start_sec:.2f}, "
-            f"end={segment_end_sec:.2f}, reason={reason}",
-            flush=True,
+        logger.info(
+            "[Segment] flush session_id=%s segment_index=%s start=%.2f end=%.2f reason=%s",
+            session.session_id,
+            segment_index,
+            segment_start_sec,
+            segment_end_sec,
+            reason,
         )
         self.persistence_service.save_segment(
             session=session,
@@ -100,8 +108,10 @@ class SegmentResultService:
             segment_start_sec=segment_start_sec,
             segment_end_sec=segment_end_sec,
             representative_frame_path=representative_frame_path,
+            representative_frame_info=representative_frame_info,
             people_results=people_results,
         )
+        state["aggregation"].cleanup()
         state["last_flushed_segment_index"] = segment_index
 
     def _build_state(self, session_id: str) -> dict:
@@ -112,6 +122,12 @@ class SegmentResultService:
             "last_flushed_segment_index": None,
             "aggregation": self._create_aggregation(),
         }
+
+    def _cleanup_state(self, state: dict) -> None:
+        aggregation = state.get("aggregation")
+        if aggregation is not None:
+            aggregation.cleanup()
+        state.clear()
 
     def _create_aggregation(self) -> SegmentAggregationService:
         return SegmentAggregationService(
