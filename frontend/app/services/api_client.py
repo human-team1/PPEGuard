@@ -131,6 +131,15 @@ class ApiClient:
         except requests.exceptions.RequestException as e:
             self._handle_request_error(e, "세션 결과 목록을 불러오지 못했습니다.")
 
+    def get_session(self, session_id: str, timeout_sec: int = 5) -> dict:
+        url = f"{self.base_url}/api/v1/sessions/{session_id}"
+        try:
+            response = requests.get(url, timeout=timeout_sec)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            self._handle_request_error(e, "?몄뀡 ?뺣낫瑜?遺덈윭?ㅼ? 紐삵뻽?듬땲??")
+
     def get_session_segments(self, session_id: str, timeout_sec: int = 5) -> dict:
         url = f"{self.base_url}/api/v1/sessions/{session_id}/segments"
         try:

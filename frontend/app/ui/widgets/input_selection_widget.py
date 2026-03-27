@@ -64,6 +64,14 @@ class InputSelectionWidget(QGroupBox):
             "accent": "#455A64",
             "message": "분석을 중지했습니다.",
         },
+        "완료": {
+            "start_text": "다시 시작",
+            "stop_text": "분석 종료",
+            "start_enabled": True,
+            "stop_enabled": False,
+            "accent": "#2E7D32",
+            "message": "분석이 정상 완료되었습니다.",
+        },
         "실패": {
             "start_text": "분석 다시 시작",
             "stop_text": "분석 종료",
@@ -124,8 +132,8 @@ class InputSelectionWidget(QGroupBox):
         self.time_edit.setEnabled(False)
         self.time_edit.setReadOnly(False)
         self.time_edit.setToolTip(
-            "날짜는 달력으로 선택하고, 시간은 시/분/초를 직접 입력할 수 있습니다. "
-            "직접 입력하지 않으면 서버 현재 시각이 사용될 수 있습니다."
+            "날짜를 달력으로 선택하고, 시간은 시 분 초를 직접 입력할 수 있습니다. "
+            "직접 입력하지 않으면 서버 현재 시각을 사용합니다."
         )
         layout.addWidget(self.time_edit)
 

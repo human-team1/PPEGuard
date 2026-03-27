@@ -42,6 +42,7 @@ class ResultView(QWidget):
         self._is_loading_segments = False
         self._live_events_connected = False
         self._last_completed_session_id = None
+        self._socket_connection_state = "disconnected"
 
         self.current_input_source = "VIDEO_FILE"
         self.selected_session_source_type = None
@@ -158,6 +159,11 @@ class ResultView(QWidget):
         self.socket_service.analysis_segment_saved.connect(
             self._on_analysis_segment_saved
         )
+        self.socket_service.connected.connect(self._on_socket_connected)
+        self.socket_service.disconnected.connect(self._on_socket_disconnected)
+        self.socket_service.connection_state_changed.connect(
+            self._on_socket_connection_state_changed
+        )
         self.socket_service.error_occurred.connect(self._on_live_socket_error)
         self.live_monitor.analysis_sample_ready.connect(
             self.socket_service.send_analysis_sample
@@ -270,8 +276,94 @@ class ResultView(QWidget):
         if self.current_session_id:
             self.load_results(reason="manual_refresh")
 
+    def _on_socket_connected(self):
+        logger.info(
+            "[ResultView] socket connected session_id=%s active_session=%s",
+            self.current_session_id,
+            self.socket_service.has_active_session(),
+        )
+
+    def _on_socket_disconnected(self):
+        logger.warning(
+            "[ResultView] socket disconnected session_id=%s current_status=%s",
+            self.current_session_id,
+            self.current_analysis_status,
+        )
+        if self.current_session_id and self.current_analysis_status not in {"completed", "failed"}:
+            self.live_monitor.status_label.setText("연결 끊김, 재연결 대기 중")
+            self.live_monitor._append_event("연결 끊김, 재연결 대기 중")
+
+    def _on_socket_connection_state_changed(self, state: str):
+        self._socket_connection_state = state
+        logger.info(
+            "[ResultView] socket connection state changed state=%s session_id=%s",
+            state,
+            self.current_session_id,
+        )
+        if state == "reconnected":
+            self._recover_after_reconnect()
+
+    def _recover_after_reconnect(self):
+        if not self.current_session_id:
+            self.load_sessions()
+            return
+
+        logger.info(
+            "[ResultView] recovering session after reconnect session_id=%s",
+            self.current_session_id,
+        )
+        self.live_monitor._append_event("재연결됨, 세션 상태 확인 중")
+        self._refresh_current_session_state()
+        self.load_sessions()
+        self.load_results(reason="socket_reconnected")
+
+    def _refresh_current_session_state(self):
+        if not self.current_session_id:
+            return
+
+        try:
+            session_payload = self.api_client.get_session(self.current_session_id, timeout_sec=5)
+        except Exception as exc:
+            logger.warning(
+                "[ResultView] failed to refresh current session state session_id=%s error=%s",
+                self.current_session_id,
+                exc,
+            )
+            self.live_monitor._append_event(f"재연결 후 세션 조회 실패: {exc}")
+            return
+
+        self.selected_session_payload = session_payload
+        self.selected_session_source_type = session_payload.get("source_type")
+        status = session_payload.get("status")
+        if status:
+            self.current_analysis_status = status
+            self.live_monitor.handle_session_status(
+                {
+                    "session_id": session_payload.get("session_id"),
+                    "source_type": session_payload.get("source_type"),
+                    "status": status,
+                }
+            )
+            if status in {"completed", "failed", "stopped"}:
+                self.segment_sync_timer.stop()
+
     def _on_sessions_loaded(self, payload: dict):
         self.loaded_sessions = payload.get("sessions", [])
+        if self.current_session_id:
+            matched_session = next(
+                (
+                    session
+                    for session in self.loaded_sessions
+                    if session.get("session_id") == self.current_session_id
+                ),
+                None,
+            )
+            if matched_session:
+                self.selected_session_payload = matched_session
+                self.selected_session_source_type = matched_session.get("source_type")
+                matched_status = matched_session.get("status")
+                if matched_status:
+                    self.current_analysis_status = matched_status
         self._fill_session_table()
         if self.current_session_id:
             self._select_session_row(self.current_session_id)
@@ -501,9 +593,9 @@ class ResultView(QWidget):
         if status in {"started", "processing"} and self.current_session_id == session_id:
             if self.has_received_segment_saved and not self.segment_sync_timer.isActive():
                 self.segment_sync_timer.start()
-        if status in {"completed", "failed", "stopping"}:
+        if status in {"completed", "failed", "stopping", "stopped"}:
             self.segment_sync_timer.stop()
-        if status in {"completed", "failed"} and self.current_session_id == session_id:
+        if status in {"completed", "failed", "stopped"} and self.current_session_id == session_id:
             if status == "completed":
                 self._last_completed_session_id = session_id
             if self.current_input_source == "VIDEO_FILE" or self.is_query_panel_active:
