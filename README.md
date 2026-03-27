@@ -17,8 +17,8 @@
 
 ## 📸 대표 이미지
 
-<img width="500" height="300" alt="화면 캡처 2026-03-27 190616" src="https://github.com/user-attachments/assets/76f24e29-2807-46ef-b764-6b3f24d6bde2" />
-<img width="500" height="300" alt="화면 캡처 2026-03-27 190644" src="https://github.com/user-attachments/assets/eb82f985-ea8a-4736-8723-650167815539" />
+<img width="850" height="500" alt="화면 캡처 2026-03-27 190616" src="https://github.com/user-attachments/assets/76f24e29-2807-46ef-b764-6b3f24d6bde2" />
+<img width="850" height="500" alt="화면 캡처 2026-03-27 190644" src="https://github.com/user-attachments/assets/eb82f985-ea8a-4736-8723-650167815539" />
 
 ---
 
