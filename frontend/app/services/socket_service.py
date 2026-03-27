@@ -1,5 +1,6 @@
 import base64
 import logging
+import os
 
 import cv2
 import numpy as np
@@ -18,6 +19,7 @@ class SocketService(QObject):
     analysis_session_status_changed = Signal(dict)
     connected = Signal()
     disconnected = Signal()
+    connection_state_changed = Signal(str)
     error_occurred = Signal(str)
 
     def __init__(self, server_url: str = "http://127.0.0.1:5000"):
@@ -31,21 +33,26 @@ class SocketService(QObject):
         self.session_id = None
         self.analysis_active = False
         self.next_frame_no = 0
+        self._was_previously_connected = False
         # diagnostic: None keeps the default transport negotiation order.
         # temporary debugging: switch to ["polling"] or ["websocket"] when comparing behaviors.
-        self._connect_transports = None
+        transport_env = (os.getenv("PPEGUARD_SOCKET_TRANSPORT") or "").strip().lower()
+        self._connect_transports = [transport_env] if transport_env in {"polling", "websocket"} else None
         self._setup_handlers()
 
     def _setup_handlers(self):
         @self.sio.on("connect")
         def on_connect():
+            is_reconnect = self._was_previously_connected
             logger.info(
                 "[Socket] connected url=%s sid=%s transports=%s",
                 self.server_url,
                 self.sio.sid,
                 self._connect_transports or "default",
             )
+            self._was_previously_connected = True
             self.connected.emit()
+            self.connection_state_changed.emit("reconnected" if is_reconnect else "connected")
 
         @self.sio.on("disconnect")
         def on_disconnect():
@@ -56,6 +63,7 @@ class SocketService(QObject):
                 self._connect_transports or "default",
             )
             self.disconnected.emit()
+            self.connection_state_changed.emit("disconnected")
 
         @self.sio.on("connect_error")
         def on_connect_error(data):
@@ -116,6 +124,12 @@ class SocketService(QObject):
     def ensure_connected(self):
         return self.connect_server()
 
+    def configure_transports(self, transports: list[str] | None = None):
+        self._connect_transports = list(transports) if transports else None
+
+    def has_active_session(self) -> bool:
+        return bool(self.analysis_active and self.session_id)
+
     def connect_server(self):
         try:
             if self.sio.connected:
@@ -150,6 +164,7 @@ class SocketService(QObject):
         self.analysis_active = False
         self.session_id = None
         self.next_frame_no = 0
+        self._was_previously_connected = False
         if self.sio.connected:
             logger.info(
                 "[Socket] disconnect requested url=%s sid=%s",

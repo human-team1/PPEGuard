@@ -1,5 +1,12 @@
 from PySide6.QtCore import QTimer, Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QVBoxLayout,
+    QWidget,
+)
 
 from app.config.settings import AppSettings
 from app.services.api_client import ApiClient
@@ -99,7 +106,10 @@ class MainWindow(QMainWindow):
         inspection_item_keys: list[str] | None = None,
     ):
         if self.session_worker and self.session_worker.isRunning():
-            self._apply_analysis_state("실패", "이미 요청 처리 중입니다. 잠시 후 다시 시도하세요.")
+            self._apply_analysis_state(
+                "실패",
+                "이미 요청 처리 중입니다. 잠시 후 다시 시도해주세요.",
+            )
             return
 
         self.result_view.prepare_live_session(source_type)
@@ -116,10 +126,11 @@ class MainWindow(QMainWindow):
                 video_started_at=video_started_at,
                 inspection_item_keys=inspection_item_keys or [],
             )
-            # (추가) 목적/이유: 동영상 분석은 시간이 소요되므로 업로드 즉시 '분석중' 상태로 전이하여 
-            # 중단 버튼을 활성화
             self.session_worker.result_ready.connect(self._on_video_uploaded)
-            self._apply_analysis_state("분석중", "영상을 업로드 중이며 분석이 시작되었습니다.")
+            self._apply_analysis_state(
+                "분석중",
+                "영상 업로드 중이며 분석이 시작되었습니다.",
+            )
         else:
             self._apply_analysis_state(
                 "시작 요청중",
@@ -140,24 +151,18 @@ class MainWindow(QMainWindow):
     def _handle_stop_request(self):
         if self.current_state != "분석중":
             return
-            
-        # (추가) 목적/이유: 동영상 파일 모드는 아직 업로드 중에 session_id가 발급되지 
-        # 않았을 수 있으므로 session_id 체크를 스킵함.
+
         is_video_mode = self.input_widget.radio_file.isChecked()
         if not is_video_mode and not self.current_session_id:
             return
-        
 
-        # (추가) 목적/이유: 요구사항 3-2에 따라 분석 중단 시 데이터 삭제 안내 팝업 출력
-        from PySide6.QtWidgets import QMessageBox
         reply = QMessageBox.question(
-            self, 
-            "분석 중단 확인", 
+            self,
+            "분석 중단 확인",
             "정말로 분석을 중단하시겠습니까?\n진행 중인 분석 결과가 삭제됩니다.",
-            QMessageBox.Yes | QMessageBox.No, 
-            QMessageBox.No
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
         )
-        
         if reply == QMessageBox.No:
             return
 
@@ -165,11 +170,12 @@ class MainWindow(QMainWindow):
             return
 
         self._apply_analysis_state("종료 요청중", "분석 종료를 요청했습니다.")
-        
-        # (추가) 목적/이유: 동영상 분석 세션은 전용 중단 API(/api/v1/video/stop)를 호출해야 함.
-        # 현재 화면 모드(radio_file)를 체크하여 적절한 API 호출 선택.
+
         if self.input_widget.radio_file.isChecked():
-            self.stop_worker = ApiWorker(self.api_client.stop_video_analysis, self.current_session_id)
+            self.stop_worker = ApiWorker(
+                self.api_client.stop_video_analysis,
+                self.current_session_id,
+            )
         else:
             self.stop_worker = ApiWorker(
                 self.result_view.socket_service.stop_webcam_analysis,
@@ -182,8 +188,6 @@ class MainWindow(QMainWindow):
         self.stop_worker.start()
 
     def _on_video_uploaded(self, payload: dict):
-        # (추가) 목적/이유: 동영상 분석이 강제 종료되거나 서버 응답이 비정상일 때
-        # 페이로드가 None이 되어 AttributeError로 앱이 튕기는(꺼지는) 것을 방지하기 위함.
         if not payload or not isinstance(payload, dict):
             self._apply_analysis_state("실패", "서버 응답이 올바르지 않습니다.")
             return
@@ -194,7 +198,7 @@ class MainWindow(QMainWindow):
         if self.current_session_id:
             self.result_view.set_session_id(self.current_session_id)
 
-        self._apply_analysis_state("중지", message)
+        self._apply_analysis_state("완료", message)
         self.result_view.set_input_source_type(
             self.input_widget.get_current_source_type()
         )
@@ -216,7 +220,7 @@ class MainWindow(QMainWindow):
         )
 
     def _on_stop_completed(self, payload: dict):
-        self._apply_analysis_state("중지", "웹캠 분석을 중지했습니다.")
+        self._apply_analysis_state("중지", "분석을 중지했습니다.")
         if payload.get("session_id"):
             self.result_view.set_session_id(payload.get("session_id"))
         self.result_view.set_input_source_type(
@@ -238,19 +242,17 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"점검 항목 설정 변경: {selected_text}")
 
     def _clear_session_worker(self):
-        # 파이썬 가비지 컬렉터가 run()이 끝나기도 전에 객체를 지워버리는 것을 막기 위해
-        # past_workers 리스트에 레퍼런스를 유지합니다.
-        if not hasattr(self, '_past_workers'):
+        if not hasattr(self, "_past_workers"):
             self._past_workers = []
-            
+
         if self.session_worker:
             self._past_workers.append(self.session_worker)
             self.session_worker = None
 
     def _clear_stop_worker(self):
-        if not hasattr(self, '_past_workers'):
+        if not hasattr(self, "_past_workers"):
             self._past_workers = []
-            
+
         if self.stop_worker:
             self._past_workers.append(self.stop_worker)
             self.stop_worker = None

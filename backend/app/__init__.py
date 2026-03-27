@@ -9,6 +9,8 @@ from app.infrastructure.service_db.init_db import create_db_tables
 socketio = SocketIO(
     cors_allowed_origins="*",
     async_mode='eventlet',
+    ping_interval=25,
+    ping_timeout=120,
     logger=False,
     engineio_logger=False,
 )
