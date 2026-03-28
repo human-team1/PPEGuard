@@ -1,30 +1,13 @@
 # 🦺 PPE Guard
 
-![Python](https://img.shields.io/badge/Python-3.x-3776AB?logo=python&logoColor=white)
-![Flask](https://img.shields.io/badge/Flask-Backend-000000?logo=flask&logoColor=white)
-![PySide6](https://img.shields.io/badge/PySide6-Desktop_UI-41CD52?logo=qt&logoColor=white)
-![YOLOv11](https://img.shields.io/badge/YOLOv11-Vision-FF6F00)
-![EasyOCR](https://img.shields.io/badge/EasyOCR-OCR-7B1FA2)
-![Socket.IO](https://img.shields.io/badge/Socket.IO-Realtime-010101?logo=socketdotio&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-Service_DB-003B57?logo=sqlite&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-On--Prem_Deploy-2496ED?logo=docker&logoColor=white)
-
 > 산업 안전 현장의 **PPE 착용 여부를 영상 분석과 OCR로 판별**하고,  
 > **결과 저장 · 조회 · 이력 관리**까지 지원하는 **온프레미스 지향 PPE 점검 시스템**입니다.
-
-
----
-
-## 📸 대표 이미지
-
-<img width="850" height="500" alt="화면 캡처 2026-03-27 190616" src="https://github.com/user-attachments/assets/76f24e29-2807-46ef-b764-6b3f24d6bde2" />
-<img width="850" height="500" alt="화면 캡처 2026-03-27 190644" src="https://github.com/user-attachments/assets/eb82f985-ea8a-4736-8723-650167815539" />
 
 ---
 
 ## 📌 프로젝트 소개
 
-**PPE Guard**는 산업 현장에서 작업자의 **안전모, 조끼 등 개인 보호 장비(PPE) 착용 여부를 자동 점검**하기 위해 만든 영상 기반 분석 시스템입니다.
+**PPE Guard**는 산업 현장에서 작업자의 **개인 보호 장비(PPE) 착용 여부를 자동 점검**하기 위해 만든 영상 기반 분석 시스템입니다.
 
 - 🎥 **동영상 파일 업로드 분석**
 - 📷 **실시간 웹캠 입력 분석**
@@ -44,21 +27,20 @@ PPE Guard는 아래 문제 해결을 목표로 설계했습니다.
 - PPE 착용 여부 점검의 **자동화**
 - 실시간 분석과 사후 분석을 모두 지원하는 **유연한 입력 방식**
 - PPE 탐지와 OCR을 결합한 **위반 이력 추적성 강화**
-- 고객사 환경에 맞춘 **DB 연동 구조 제공**
 - 사내망에서도 운영 가능한 **온프레미스 배포 구조 확보**
 
 ---
 
 ## 🛠 기술 스택
 
-| 구분 | 기술 | 역할 |
-|------|------|------|
-| **Frontend** | PySide6 (Qt) | 데스크톱 UI, 입력 선택, 결과 조회 |
-| **Backend** | Python, Flask | API, 비즈니스 로직, 결과 저장 |
-| **AI / Vision** | YOLOv11, EasyOCR | PPE 탐지, 작업자 번호 OCR |
-| **Communication** | Socket.IO | 실시간 분석 상태 및 이벤트 전달 |
-| **Database** | SQLite, MySQL | 서비스 데이터 저장, 고객사 DB 연동 |
-| **Infra / Deployment** | Docker, `.env` | 온프레미스 배포, 환경별 설정 분리 |
+![Python](https://img.shields.io/badge/Python-3.x-3776AB?logo=python&logoColor=white)
+![Flask](https://img.shields.io/badge/Flask-Backend-000000?logo=flask&logoColor=white)
+![PySide6](https://img.shields.io/badge/PySide6-Desktop_UI-41CD52?logo=qt&logoColor=white)
+![YOLOv11](https://img.shields.io/badge/YOLOv11-Vision-FF6F00)
+![EasyOCR](https://img.shields.io/badge/EasyOCR-OCR-7B1FA2)
+![Socket.IO](https://img.shields.io/badge/Socket.IO-Realtime-010101?logo=socketdotio&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-Service_DB-003B57?logo=sqlite&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-On--Prem_Deploy-2496ED?logo=docker&logoColor=white)
 
 ---
 
@@ -94,11 +76,12 @@ PPE Guard는 **프론트엔드 / 백엔드 / 서비스 DB / 고객사 DB**를 �
 | **Domain** | PPE 판정 규칙, 엔티티, 포트 인터페이스 |
 | **Infrastructure** | YOLO/EasyOCR 연동, 서비스 DB/고객사 DB 구현, 파일 저장 |
 
-### 설계 의도
-- 비즈니스 규칙은 **도메인**에 유지
-- 분석 흐름 제어는 **애플리케이션 계층**에서 수행
-- AI 모델과 DB 구현은 **인프라 계층**으로 격리
-- 고객사별 DB 차이는 **설정과 구현체 수준**에서 흡수
+---
+
+## 📸 대표 이미지
+
+<img width="850" height="500" alt="화면 캡처 2026-03-27 190616" src="https://github.com/user-attachments/assets/76f24e29-2807-46ef-b764-6b3f24d6bde2" />
+<img width="850" height="500" alt="화면 캡처 2026-03-27 190644" src="https://github.com/user-attachments/assets/eb82f985-ea8a-4736-8723-650167815539" />
 
 ---
 
